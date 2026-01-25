@@ -1,4 +1,5 @@
-/.idea/
+.idea/
 *.py[cod]
 *$py.class
 __pycache__/
+.git/
