@@ -3,3 +3,9 @@
 *$py.class
 __pycache__/
 .git/
+unsloth/
+llama.cpp/
+image/
+models/
+outputs/
+data/
