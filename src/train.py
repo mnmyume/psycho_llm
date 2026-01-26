@@ -100,8 +100,8 @@ print(f"Peak reserved memory for training = {used_memory_for_lora} GB.")
 print(f"Peak reserved memory % of max memory = {used_percentage} %.")
 print(f"Peak reserved memory for training % of max memory = {lora_percentage} %.")
 
-model.save_pretrained("lora_model")  # Local saving
-tokenizer.save_pretrained("lora_model")
+model.save_pretrained("models/lora_model")  # Local saving
+tokenizer.save_pretrained("models/lora_model")
 
 # Save locally to 16bit (save full model, not needed)
 if False: model.save_pretrained_merged("unsloth_finetune", tokenizer,)

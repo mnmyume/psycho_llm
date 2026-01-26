@@ -4,6 +4,7 @@
 __pycache__/
 .git/
 unsloth/
+unsloth_compiled_cache/
 llama.cpp/
 image/
 models/
