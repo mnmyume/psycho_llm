@@ -20,7 +20,7 @@ dataset_name = args.dataset_name
 run_name = args.run_name
 
 output_dir = f"outputs/{run_name}"  # Checkpoints
-final_save_path = f"models/{run_name}"
+final_save_path = f"lora_model/{run_name}"
 
 instruction = "Describe the artistic style and emotional content of this image."
 

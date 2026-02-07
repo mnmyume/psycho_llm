@@ -7,7 +7,8 @@ unsloth/
 unsloth_compiled_cache/
 llama.cpp/
 image/
-models/
+lora_model/
 outputs/
 dataset/
 logs/
+demos/

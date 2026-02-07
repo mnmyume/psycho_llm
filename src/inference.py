@@ -19,7 +19,7 @@ dataset = dataset.map(fix_path)
 dataset = dataset.cast_column("image_path", Image())
 
 model, tokenizer = FastVisionModel.from_pretrained(
-    model_name = "models/qwen3_vl_8b_emoart_5k_v1", # YOUR MODEL YOU USED FOR TRAINING
+    model_name = "lora_model/qwen3_vl_8b_emoart_5k_v1", # YOUR MODEL YOU USED FOR TRAINING
     load_in_4bit = True, # Set to False for 16bit LoRA
 )
 FastVisionModel.for_inference(model) # Enable for inference
