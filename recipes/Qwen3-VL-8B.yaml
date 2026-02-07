@@ -1,0 +1,5 @@
+model_name: unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit
+dataset_name: printblue/EmoArt-5k
+output_dir: outputs/qwen_v1
+learning_rate: 2.0e-4
+batch_size: 2

@@ -9,4 +9,5 @@ llama.cpp/
 image/
 models/
 outputs/
-data/
+dataset/
+logs/

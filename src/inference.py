@@ -1,18 +1,32 @@
+import os
 from unsloth import FastVisionModel
-from datasets import load_dataset
+from datasets import load_dataset, Image
 from transformers import TextStreamer
 
-dataset = load_dataset("unsloth/LaTeX_OCR", split = "train")
+dataset = load_dataset(
+    "json",
+    data_files="dataset/EmoArt-5k/annotation.json",
+    split="train"
+)
+DATASET_ROOT = os.path.abspath("dataset/EmoArt-5k")
+def fix_path(example):
+    example["image_path"] = os.path.join(
+        DATASET_ROOT,
+        example["image_path"].replace("\\", "/")
+    )
+    return example
+dataset = dataset.map(fix_path)
+dataset = dataset.cast_column("image_path", Image())
 
 model, tokenizer = FastVisionModel.from_pretrained(
-    model_name = "models/lora_model", # YOUR MODEL YOU USED FOR TRAINING
+    model_name = "models/qwen3_vl_8b_emoart_5k_v1", # YOUR MODEL YOU USED FOR TRAINING
     load_in_4bit = True, # Set to False for 16bit LoRA
 )
-FastVisionModel.for_inference(model) # Enable for inference!
+FastVisionModel.for_inference(model) # Enable for inference
 
-image = dataset[0]["image"]
+image = dataset[0]["image_path"]
 
-instruction = "Write the LaTeX representation for this image."
+instruction = "Describe the artistic style and emotional content of this image."
 
 messages = [
     {"role": "user", "content": [
@@ -29,5 +43,5 @@ inputs = tokenizer(
 ).to("cuda")
 
 text_streamer = TextStreamer(tokenizer, skip_prompt = True)
-_ = model.generate(**inputs, streamer = text_streamer, max_new_tokens = 128,
+_ = model.generate(**inputs, streamer = text_streamer, max_new_tokens = 4096,
                    use_cache = True, temperature = 1.5, min_p = 0.1)
