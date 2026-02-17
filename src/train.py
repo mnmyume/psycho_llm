@@ -5,8 +5,11 @@ from PIL import Image
 from unsloth import FastVisionModel
 from datasets import load_dataset, Image
 from huggingface_hub import hf_hub_download
+from transformers.trainer_utils import get_last_checkpoint
 from unsloth.trainer import UnslothVisionDataCollator
 from trl import SFTTrainer, SFTConfig
+
+from data_loaders.EmoArt import EmoArt
 
 
 parser = argparse.ArgumentParser()
@@ -22,23 +25,15 @@ run_name = args.run_name
 output_dir = f"outputs/{run_name}"  # Checkpoints
 final_save_path = f"lora_model/{run_name}"
 
-instruction = "Describe the artistic style and emotional content of this image."
+last_checkpoint = None
+if os.path.isdir(output_dir):
+    last_checkpoint = get_last_checkpoint(output_dir)
+    if last_checkpoint:
+        print(f"Found checkpoint! Resuming from {last_checkpoint}")
+    else:
+        print("No checkpoint found. Starting from scratch.")
 
-# load local dataset
-dataset = load_dataset(
-    "json",
-    data_files="dataset/EmoArt-5k/annotation.json",
-    split="train"
-)
-DATASET_ROOT = os.path.abspath("dataset/EmoArt-5k")
-def fix_path(example):
-    example["image_path"] = os.path.join(
-        DATASET_ROOT,
-        example["image_path"].replace("\\", "/")
-    )
-    return example
-dataset = dataset.map(fix_path)
-dataset = dataset.cast_column("image_path", Image())
+train_dataset = EmoArt()
 
 model, tokenizer = FastVisionModel.from_pretrained(
     model_name,
@@ -62,31 +57,6 @@ model = FastVisionModel.get_peft_model(
     loftq_config=None,
 )
 
-# Conversion Function
-def convert_to_conversation(sample):
-    output_text = sample["description"]
-    if isinstance(output_text, dict):
-        output_text = output_text.get('text', str(output_text))
-
-    image_obj = sample["image_path"]
-
-    conversation = [
-        {"role": "user",
-         "content": [
-             {"type": "text", "text": instruction},
-             {"type": "image", "image": image_obj}]
-         },
-        {"role": "assistant",
-         "content": [
-             {"type": "text", "text": output_text}]
-         },
-    ]
-    return {"messages": conversation}
-
-
-# Apply conversion
-converted_dataset = [convert_to_conversation(sample) for sample in dataset]
-
 FastVisionModel.for_training(model)
 
 # Trainer
@@ -94,7 +64,7 @@ trainer = SFTTrainer(
     model=model,
     tokenizer=tokenizer,
     data_collator=UnslothVisionDataCollator(model, tokenizer),
-    train_dataset=converted_dataset,
+    train_dataset=train_dataset.data,
     args=SFTConfig(
         per_device_train_batch_size=2,
         gradient_accumulation_steps=4,
@@ -117,7 +87,7 @@ trainer = SFTTrainer(
 )
 
 # Start Training
-trainer_stats = trainer.train()
+trainer_stats = trainer.train(resume_from_checkpoint=last_checkpoint)
 
 # Save
 print(f"Saving model to {final_save_path}...")

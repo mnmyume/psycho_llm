@@ -1,4 +1,4 @@
-from utils.jsonl import read_jsonl
+from datasets import load_dataset, Image
 
 
 class Dataset(object):

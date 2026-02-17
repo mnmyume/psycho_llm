@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=psycho
-#SBATCH --time=23:00:00
+#SBATCH --job-name=psy_30
+#SBATCH --time=3-00:00:00
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
@@ -20,9 +20,10 @@ echo "Job ID: $SLURM_JOB_ID"
 echo "Running on node: $SLURMD_NODENAME"
 echo "Date: $(date)"
 
-MODEL="unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit"
-DATASET="printblue/EmoArt-5k"
-RUN_NAME="qwen3_vl_8b_emoart_5k_v1"
+# You need to point your script to the 4-bit bitsandbytes (bnb) version of the model, which is designed for fine-tuning.
+MODEL="unsloth/Qwen3-VL-32B-Instruct-unsloth-bnb-4bit"
+DATASET="printblue/EmoArt-130k"
+RUN_NAME="qwen3_vl_30b_emoart_130k_v1"
 
 srun python src/train.py \
     --model_name "$MODEL" \
