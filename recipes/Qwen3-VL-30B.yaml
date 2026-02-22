@@ -1,23 +1,23 @@
 # ============================================================
-# Qwen3-VL-8B LoRA Fine-Tuning Recipe
+# Qwen3-VL-30B LoRA Fine-Tuning Recipe
 # ============================================================
-# This YAML recipe defines the default configuration for fine-tuning
-# Qwen3-VL-8B on the EmoArt-5k dataset. Override any value via CLI.
+# Recipe for the larger 30B model on the full EmoArt-130k dataset.
+# Requires more VRAM and training time.
 #
 # Usage:
-#   python src/train.py --config recipes/Qwen3-VL-8B.yaml --run_name my_exp
+#   python src/train.py --config recipes/Qwen3-VL-30B.yaml
 # ============================================================
 
 # --- Model ---
-model_name: unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit
+model_name: unsloth/Qwen3-VL-32B-Instruct-unsloth-bnb-4bit
 load_in_4bit: true
 
 # --- Dataset ---
-dataset_path: dataset/EmoArt-5k/annotation.json
-dataset_dir: dataset/EmoArt-5k
+dataset_path: dataset/EmoArt-130k/Annotation.json
+dataset_dir: dataset/EmoArt-130k
 
 # --- Run ---
-run_name: qwen3_vl_8b_emoart_5k
+run_name: qwen3_vl_30b_emoart_130k
 
 # --- LoRA ---
 lora_r: 16

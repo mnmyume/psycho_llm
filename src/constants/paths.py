@@ -1,23 +1,22 @@
-import os
-from os.path import join, dirname
+"""
+Project path constants.
 
-# EmoArt Dataset
-EMOART_5K_DATA_DIR = join(
-    "dataset",
-    "EmoArt-5k",
-)
+All paths are resolved relative to the project root directory,
+making them work correctly regardless of the working directory.
+"""
 
-EMOART_130K_DATA_DIR = join(
-    "dataset",
-    "EmoArt-130k",
-)
+from pathlib import Path
 
-EMOART_5K_DATA_PATH = join(
-    EMOART_5K_DATA_DIR,
-    "annotation.json"
-)
+# Project root — two levels up from src/constants/paths.py
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-EMOART_130K_DATA_PATH = join(
-    EMOART_130K_DATA_DIR,
-    "Annotation.json"
-)
+# --- EmoArt Dataset Paths ---
+EMOART_5K_DATA_DIR = str(PROJECT_ROOT / "dataset" / "EmoArt-5k")
+EMOART_130K_DATA_DIR = str(PROJECT_ROOT / "dataset" / "EmoArt-130k")
+
+EMOART_5K_ANNOTATION = str(PROJECT_ROOT / "dataset" / "EmoArt-5k" / "annotation.json")
+EMOART_130K_ANNOTATION = str(PROJECT_ROOT / "dataset" / "EmoArt-130k" / "Annotation.json")
+
+# --- Model Paths ---
+LORA_MODEL_DIR = str(PROJECT_ROOT / "lora_model")
+OUTPUT_DIR = str(PROJECT_ROOT / "outputs")

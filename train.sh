@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=psy_30
+#SBATCH --job-name=psy_train
 #SBATCH --time=3-00:00:00
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=4
@@ -20,12 +20,17 @@ echo "Job ID: $SLURM_JOB_ID"
 echo "Running on node: $SLURMD_NODENAME"
 echo "Date: $(date)"
 
-# You need to point your script to the 4-bit bitsandbytes (bnb) version of the model, which is designed for fine-tuning.
-MODEL="unsloth/Qwen3-VL-32B-Instruct-unsloth-bnb-4bit"
-DATASET="printblue/EmoArt-130k"
-RUN_NAME="qwen3_vl_30b_emoart_130k_v1"
+# ============================================================
+# Training with YAML config (recommended)
+# Override any value via CLI flags
+# ============================================================
 
+# --- 8B model on EmoArt-5k ---
+# srun python src/train.py \
+#     --config recipes/Qwen3-VL-8B.yaml \
+#     --run_name "qwen3_vl_8b_emoart_5k_v1"
+
+# --- 30B model on EmoArt-130k ---
 srun python src/train.py \
-    --model_name "$MODEL" \
-    --dataset_name "$DATASET" \
-    --run_name "$RUN_NAME"
+    --config recipes/Qwen3-VL-30B.yaml \
+    --run_name "qwen3_vl_30b_emoart_130k_v1"
