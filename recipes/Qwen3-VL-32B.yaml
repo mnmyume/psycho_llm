@@ -1,11 +1,11 @@
 # ============================================================
-# Qwen3-VL-30B LoRA Fine-Tuning Recipe
+# Qwen3-VL-32B LoRA Fine-Tuning Recipe
 # ============================================================
-# Recipe for the larger 30B model on the full EmoArt-130k dataset.
+# Recipe for the larger 32B model on the full EmoArt-130k dataset.
 # Requires more VRAM and training time.
 #
 # Usage:
-#   python src/train.py --config recipes/Qwen3-VL-30B.yaml
+#   python src/train.py --config recipes/Qwen3-VL-32B.yaml
 # ============================================================
 
 # --- Model ---
@@ -17,7 +17,7 @@ dataset_path: dataset/EmoArt-130k/Annotation.json
 dataset_dir: dataset/EmoArt-130k
 
 # --- Run ---
-run_name: qwen3_vl_30b_emoart_130k
+run_name: qwen3_vl_32B_emoart_130k
 
 # --- LoRA ---
 lora_r: 16

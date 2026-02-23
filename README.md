@@ -1,6 +1,6 @@
 # Psycho LLM
 
-Multi-modal LLM psychological analysis of sandbox drawings and artwork. Uses **Qwen3-VL** (8B / 30B) fine-tuned with **LoRA** on emotion-annotated art datasets.
+Multi-modal LLM psychological analysis of sandbox drawings and artwork. Uses **Qwen3-VL** (8B / 32B) fine-tuned with **LoRA** on emotion-annotated art datasets.
 
 ## Project Structure
 
@@ -20,7 +20,7 @@ psycho_llm/
 │       └── model_utils.py     # Model loading, LoRA, and generation utilities
 ├── recipes/                   # YAML training recipes
 │   ├── Qwen3-VL-8B.yaml
-│   └── Qwen3-VL-30B.yaml
+│   └── Qwen3-VL-32B.yaml
 ├── dataset/                   # Dataset files (gitignored)
 ├── lora_model/                # Saved LoRA adapters (gitignored)
 ├── outputs/                   # Training checkpoints (gitignored)

@@ -13,3 +13,5 @@ dataset/
 logs/
 demos/
 docs/
+.gradio/
+.gradio/certificate.pem

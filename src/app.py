@@ -9,10 +9,20 @@ Provides a user-friendly interface where users can:
 The model is loaded once on startup for fast repeated inference.
 
 Usage:
+    # With a fine-tuned LoRA model:
     python src/app.py --model_path lora_model/qwen3_vl_8b_emoart_5k_v1
+    
+    # With the base model (no LoRA):
+    python src/app.py --model_path unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit
 
     # Custom port and shareable link:
     python src/app.py --model_path lora_model/qwen3_vl_8b_emoart_5k_v1 --port 7861 --share
+
+    Wait until you see: Launching Gradio server on port 7860...
+    Then run based on the node on your local machine:
+    ssh -N -L 7860:watgpu[NODE_NUM]:7860 h5dai@watgpu
+
+    Then open http://localhost:7860 in your browser.
 """
 
 import argparse
@@ -29,31 +39,42 @@ from models.model_utils import load_model_for_inference, generate_response
 
 # ----- Default Prompts -----
 PROMPTS = {
-    "🧠 Psychological Analysis": (
-        "Analyze this sandbox image. Describe the psychological themes, "
-        "emotional state, and potential personality traits of the creator. "
-        "Your answer should use JSON format."
-    ),
-    "🎨 Artistic Style & Emotion": (
-        "Describe the artistic style and emotional content of this image. "
-        "Your answer should use JSON format."
-    ),
-    "💼 Career Recommendation": (
-        "Based on this sandbox drawing, analyze the creator's personality traits, "
-        "interests, and strengths. Then recommend 3 suitable careers with explanations. "
-        "Your answer should use JSON format."
-    ),
-    "❤️ Mental Health Assessment": (
-        "Analyze this sandbox image for indicators of the creator's current mental state. "
-        "Consider the use of color, space, symbols, and composition. "
-        "Provide observations and gentle suggestions. "
-        "Your answer should use JSON format."
+    "❄️ Cleanness Testing": (
+        "Analyze the brown path in this isometric image across two dimensions: \"clean vs. chaotic\" (organized/continuous vs. fragmented/broken) and \"simple vs. complicated\" (basic/few turns vs. intricate/branching/winding).\n"
+        "Focus ONLY on the brown path. Continuity is determined strictly by whether the path connects; a path is continuous if it is unbroken, even if it divides the white snow into separate, disconnected fields.\n"
+        "Output strictly raw JSON (no markdown formatting) with exactly two keys:\n"
+        "\"structural_assessment\": A short phrase (2-6 words) describing both dimensions of the path (e.g., \"simple and continuous\", \"complex but completely smooth\", \"complicated and highly fragmented\").\n"
+        "\"brief_explanation\": A 1-2 sentence justification based purely on the path's visual connectivity, layout, and intricacy."
     ),
     "✏️ Custom Prompt": "",
 }
 
 
-def create_app(model, tokenizer):
+# ----- Available Models -----
+MODELS = {
+    "Base Model (8B)": "unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit",
+    "Base Model (32B)": "unsloth/Qwen3-VL-32B-Instruct-unsloth-bnb-4bit",
+    "LoRA (32B EmoArt 130k)": "lora_model/qwen3_vl_32B_emoart_130k_v1",
+}
+
+# Global variables to cache the currently loaded model and its path
+current_model = None
+current_tokenizer = None
+current_model_path = ""
+
+def load_or_get_model(model_path: str, load_in_4bit: bool = True):
+    global current_model, current_tokenizer, current_model_path
+    if current_model is None or current_model_path != model_path:
+        print(f"Loading model: {model_path}...")
+        current_model, current_tokenizer = load_model_for_inference(
+            model_path=model_path,
+            load_in_4bit=load_in_4bit,
+        )
+        current_model_path = model_path
+    return current_model, current_tokenizer
+
+
+def create_app(initial_model_path, load_in_4bit):
     """Build and return the Gradio interface.
 
     Args:
@@ -64,7 +85,7 @@ def create_app(model, tokenizer):
         A Gradio Blocks app ready to launch.
     """
 
-    def analyze_image(image, prompt_type, custom_prompt, temperature, max_tokens):
+    def analyze_image(image, prompt_type, custom_prompt, temperature, max_tokens, selected_model_key):
         """Process an uploaded image and return the model's analysis."""
         if image is None:
             return "⚠️ Please upload an image first."
@@ -76,6 +97,10 @@ def create_app(model, tokenizer):
             return "⚠️ Please enter a prompt."
 
         try:
+            # Dynamically load the model if the selection has changed
+            model_path = MODELS.get(selected_model_key, initial_model_path)
+            model, tokenizer = load_or_get_model(model_path, load_in_4bit)
+
             response = generate_response(
                 model=model,
                 tokenizer=tokenizer,
@@ -97,26 +122,6 @@ def create_app(model, tokenizer):
     # ----- Build the UI -----
     with gr.Blocks(
         title="Psycho LLM — Sandbox Image Analyzer",
-        theme=gr.themes.Soft(
-            primary_hue="indigo",
-            secondary_hue="purple",
-        ),
-        css="""
-            .main-header {
-                text-align: center;
-                padding: 1rem 0;
-            }
-            .main-header h1 {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                font-size: 2.2rem;
-            }
-            .main-header p {
-                color: #6b7280;
-                font-size: 1.1rem;
-            }
-        """,
     ) as app:
         # Header
         gr.HTML("""
@@ -135,9 +140,16 @@ def create_app(model, tokenizer):
                     height=400,
                 )
 
+                model_selector = gr.Dropdown(
+                    choices=list(MODELS.keys()),
+                    value="Base Model (8B)" if "8B" in initial_model_path else list(MODELS.keys())[0],
+                    label="🧠 Selected Model",
+                    info="If you change this, the new model will be loaded on the first request (which takes a minute).",
+                )
+
                 prompt_type = gr.Dropdown(
                     choices=list(PROMPTS.keys()),
-                    value="🧠 Psychological Analysis",
+                    value="❄️ Cleanness Testing",
                     label="🔮 Analysis Type",
                 )
 
@@ -171,7 +183,6 @@ def create_app(model, tokenizer):
                 output = gr.Textbox(
                     label="📋 Analysis Result",
                     lines=25,
-                    show_copy_button=True,
                 )
 
         # Event handlers
@@ -183,7 +194,7 @@ def create_app(model, tokenizer):
 
         analyze_btn.click(
             fn=analyze_image,
-            inputs=[image_input, prompt_type, custom_prompt, temperature, max_tokens],
+            inputs=[image_input, prompt_type, custom_prompt, temperature, max_tokens, model_selector],
             outputs=[output],
         )
 
@@ -211,20 +222,20 @@ def main():
     )
     args = parser.parse_args()
 
-    # Load model once at startup
-    print("Loading model for the web UI...")
-    model, tokenizer = load_model_for_inference(
-        model_path=args.model_path,
-        load_in_4bit=not args.no_4bit,
-    )
+    # Load the initially requested model
+    print(f"Loading initial model for the web UI: {args.model_path}")
+    load_or_get_model(args.model_path, not args.no_4bit)
 
     # Build and launch the app
-    app = create_app(model, tokenizer)
+    print("Building Gradio UI...")
+    app = create_app(initial_model_path=args.model_path, load_in_4bit=not args.no_4bit)
+    print(f"Launching Gradio server on port {args.port}...")
     app.launch(
         server_name="0.0.0.0",
         server_port=args.port,
         share=args.share,
     )
+    print("Gradio server exited.")
 
 
 if __name__ == "__main__":
