@@ -6,6 +6,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
+#SBATCH --nodelist=watgpu508,watgpu708,watgpu808,watgpu908,watgpu1008
 
 
 #SBATCH -o logs/JOB%j.out
@@ -45,5 +46,5 @@ echo "Date: $(date)"
 
 # --- Sandbox-001 (Qwen3.5-9B) ---
 srun python src/train.py \
-    --config recipes/sandbox-001-qwen3.5-9b.yaml \
-    --run_name "sandbox_001_qwen3.5-9b_v1"
+    --config recipes/sandbox-001-qwen3.5-35b.yaml \
+    --run_name "sandbox_001_qwen3.5-35b_v1"

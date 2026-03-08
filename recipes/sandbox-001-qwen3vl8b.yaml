@@ -1,0 +1,46 @@
+# ============================================================
+# Sandbox-001 LoRA Fine-Tuning Recipe (Qwen3-VL-8B, Unsloth)
+# ============================================================
+# Fine-tune Qwen3-VL-8B on the sandbox-001 isometric image
+# scoring dataset (chaos/tidy + monotony/variety, 1-5 scales).
+#
+# Usage:
+#   python src/train.py --config recipes/sandbox-001-qwen3vl8b.yaml --run_name sandbox_001_qwen3vl8b_v1
+# ============================================================
+
+# --- Model ---
+model_name: unsloth/Qwen3-VL-8B-Instruct
+backend: unsloth
+load_in_4bit: false
+
+# --- Dataset ---
+dataset_path: dataset/sandbox-001/train_dataset.jsonl
+dataset_dir: dataset/sandbox-001
+
+# --- Run ---
+run_name: sandbox_001_qwen3vl8b
+
+# --- LoRA ---
+lora_r: 16
+lora_alpha: 16
+lora_dropout: 0.0
+finetune_vision_layers: true
+finetune_language_layers: true
+finetune_attention_modules: true
+finetune_mlp_modules: true
+
+# --- Training ---
+batch_size: 2
+gradient_accumulation_steps: 4
+learning_rate: 2.0e-4
+num_epochs: 1
+warmup_steps: 5
+max_length: 2048
+lr_scheduler_type: linear
+weight_decay: 0.001
+seed: 3407
+
+# --- Inference ---
+inference_max_tokens: 4096
+inference_temperature: 1.5
+inference_min_p: 0.1

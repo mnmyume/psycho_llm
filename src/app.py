@@ -10,7 +10,7 @@ The model is loaded once on startup for fast repeated inference.
 
 Usage:
     # With a fine-tuned LoRA model:
-    python src/app.py --model_path lora_model/qwen3_vl_8b_emoart_5k_v1
+    python src/app.py --model_path lora_model/sandbox_001_qwen3vl32b_v1
     
     # With the base model (no LoRA):
     python src/app.py --model_path unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit
@@ -32,6 +32,9 @@ import sys
 # Ensure the src/ directory is on the Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Use a user-specific temp dir to avoid PermissionError on shared systems
+os.environ["GRADIO_TEMP_DIR"] = os.path.join(os.path.expanduser("~"), ".gradio_tmp")
+
 import gradio as gr
 
 from models.model_utils import load_model_for_inference, generate_response
@@ -46,6 +49,12 @@ PROMPTS = {
         "\"structural_assessment\": A short phrase (2-6 words) describing both dimensions of the path (e.g., \"simple and continuous\", \"complex but completely smooth\", \"complicated and highly fragmented\").\n"
         "\"brief_explanation\": A 1-2 sentence justification based purely on the path's visual connectivity, layout, and intricacy."
     ),
+    "🏖️ Sandbox Scoring": (
+        "Analyze this isometric sandbox image. Rate it on two dimensions from 1 to 5. "
+        "Dimension 1: Chaos to Tidy (1=chaotic/fragmented, 5=tidy/smooth). "
+        "Dimension 2: Monotony to Variety (1=monotonous/simple, 5=variety/complicated). "
+        "Output strict JSON with keys 'chaos_tidy_score' and 'monotony_variety_score'."
+    ),
     "✏️ Custom Prompt": "",
 }
 
@@ -53,8 +62,9 @@ PROMPTS = {
 # ----- Available Models -----
 # Each entry maps a display name to (model_path, backend)
 MODELS = {
+    "LoRA (Sandbox-001-Qwen3.5-9B)": ("lora_model/sandbox_001_qwen3.5-9b_v1", "hf"),
+    "LoRA (Sandbox-001-Qwen3-VL-32B)": ("lora_model/sandbox_001_qwen3vl32b_v1", "unsloth"),
     "Base Model (Qwen3.5-35B-A3B)": ("Qwen/Qwen3.5-35B-A3B", "hf"),
-    "LoRA (Sandbox-001)": ("lora_model/sandbox_001", "hf"),
     "Base Model (Qwen3-VL-32B)": ("unsloth/Qwen3-VL-32B-Instruct-unsloth-bnb-4bit", "unsloth"),
     "Base Model (Qwen3-VL-8B)": ("unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit", "unsloth"),
 }
@@ -118,6 +128,8 @@ def create_app(initial_model_path, load_in_4bit):
             )
             return response
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return f"❌ Error during analysis: {str(e)}"
 
     def update_prompt_visibility(prompt_type):
@@ -212,8 +224,8 @@ def main():
     """Parse arguments, load model, and launch the Gradio app."""
     parser = argparse.ArgumentParser(description="Launch the Psycho LLM web UI.")
     parser.add_argument(
-        "--model_path", type=str, required=True,
-        help="Path to LoRA adapter directory or base model ID.",
+        "--model_path", type=str, default=None,
+        help="Path to LoRA adapter directory or base model ID. Defaults to the first model in the MODELS list.",
     )
     parser.add_argument(
         "--no_4bit", action="store_true",
@@ -229,13 +241,21 @@ def main():
     )
     args = parser.parse_args()
 
-    # Load the initially requested model
-    print(f"Loading initial model for the web UI: {args.model_path}")
-    load_or_get_model(args.model_path, not args.no_4bit)
+    # Resolve initial model: use --model_path if provided, otherwise first entry in MODELS
+    if args.model_path:
+        initial_model_path = args.model_path
+        initial_backend = "hf"
+    else:
+        first_key = list(MODELS.keys())[0]
+        initial_model_path, initial_backend = MODELS[first_key]
+
+    # Load the initial model
+    print(f"Loading initial model for the web UI: {initial_model_path}")
+    load_or_get_model(initial_model_path, initial_backend, not args.no_4bit)
 
     # Build and launch the app
     print("Building Gradio UI...")
-    app = create_app(initial_model_path=args.model_path, load_in_4bit=not args.no_4bit)
+    app = create_app(initial_model_path=initial_model_path, load_in_4bit=not args.no_4bit)
     print(f"Launching Gradio server on port {args.port}...")
     app.launch(
         server_name="0.0.0.0",

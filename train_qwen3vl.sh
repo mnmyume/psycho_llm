@@ -33,7 +33,12 @@ echo "Date: $(date)"
 #     --config recipes/Qwen3-VL-8B.yaml \
 #     --run_name "qwen3_vl_8b_emoart_5k_v1"
 
-# --- 32B model on EmoArt-130k ---
+# --- 32B model on Sandbox-001 ---
+# srun python src/train.py \
+#     --config recipes/sandbox-001-qwen3vl32b.yaml \
+#     --run_name "sandbox_001_qwen3vl32b_v1"
+
+# --- 8B model on Sandbox-001 ---
 srun python src/train.py \
-    --config recipes/sandbox-001-qwen3vl32b.yaml \
-    --run_name "sandbox_001_qwen3vl32b_v1"
+    --config recipes/sandbox-001-qwen3vl8b.yaml \
+    --run_name "sandbox_001_qwen3vl8b_v1"

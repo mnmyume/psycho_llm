@@ -99,8 +99,8 @@ def _generate_unsloth(model, tokenizer, image, prompt, **gen_kwargs) -> str:
     )
 
     inputs = tokenizer(
-        image,
-        input_text,
+        images=[image],
+        text=[input_text],
         add_special_tokens=False,
         return_tensors="pt",
     ).to(model.device)
@@ -246,6 +246,15 @@ def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
 
     stream = gen_kwargs.pop("stream", False)
     streamer = TextStreamer(processor.tokenizer, skip_prompt=True) if stream else None
+
+    # Fix: generation_config may store eos_token_id as a set,
+    # which causes "unhashable type: 'set'" during generate().
+    if hasattr(model, "generation_config"):
+        gc = model.generation_config
+        if isinstance(getattr(gc, "eos_token_id", None), set):
+            gc.eos_token_id = list(gc.eos_token_id)
+        if isinstance(getattr(gc, "pad_token_id", None), set):
+            gc.pad_token_id = list(gc.pad_token_id)
 
     with torch.no_grad():
         output_ids = model.generate(

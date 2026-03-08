@@ -25,16 +25,10 @@ import json
 import os
 import sys
 
+from prompts import PROMPTS
 
-# ── Prompt template (generalized for diverse sandbox scenes) ───────────
-PROMPT = (
-    "Analyze this isometric sandbox image. "
-    "Rate it on two dimensions from 1 to 5. "
-    "Dimension 1: Chaos to Tidy (1=chaotic/fragmented, 5=tidy/smooth). "
-    "Dimension 2: Monotony to Variety (1=monotonous/simple, 5=variety/complicated). "
-    "Output strict JSON with keys 'chaos_tidy_score' and 'monotony_variety_score'."
-)
 
+# Removed inline PROMPT string mappings since they are now extracted to src/prompts.py
 
 def parse_args():
     """Parse command-line arguments."""
@@ -59,6 +53,13 @@ def parse_args():
         default="dataset/sandbox-001/train_dataset.jsonl",
         help="Path where the output JSONL will be written.",
     )
+    parser.add_argument(
+        "--prompt_name",
+        type=str,
+        default="expert_reasoning",
+        choices=list(PROMPTS.keys()),
+        help="Name of the prompt template to use from src/prompts.py.",
+    )
     return parser.parse_args()
 
 
@@ -80,7 +81,7 @@ def validate_score(value: str, column_name: str, row_num: int) -> int | None:
     return score
 
 
-def build_sample(image_abs_path: str, chaos_tidy: int, monotony_variety: int) -> dict:
+def build_sample(image_abs_path: str, chaos_tidy: int, monotony_variety: int, prompt_string: str, reasoning: str | None = None) -> dict:
     """Build a single JSONL sample in the Qwen3-VL multimodal chat format.
 
     The format mirrors the existing EmoArt data loader:
@@ -89,11 +90,15 @@ def build_sample(image_abs_path: str, chaos_tidy: int, monotony_variety: int) ->
           {role: assistant,  content: [{type: text, ...}]},
       ]
     """
+    response_dict = {}
+    if reasoning:
+        response_dict["reasoning"] = reasoning
+        
+    response_dict["chaos_tidy_score"] = chaos_tidy
+    response_dict["monotony_variety_score"] = monotony_variety
+    
     response_json = json.dumps(
-        {
-            "chaos_tidy_score": chaos_tidy,
-            "monotony_variety_score": monotony_variety,
-        },
+        response_dict,
         ensure_ascii=False,
     )
 
@@ -102,7 +107,7 @@ def build_sample(image_abs_path: str, chaos_tidy: int, monotony_variety: int) ->
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": PROMPT},
+                    {"type": "text", "text": prompt_string},
                     {"type": "image", "image": image_abs_path},
                 ],
             },
@@ -120,6 +125,7 @@ def main():
     csv_path = args.csv_path
     image_dir = os.path.abspath(args.image_dir)
     output_path = args.output
+    prompt_string = PROMPTS[args.prompt_name]
 
     # ── Validate inputs ────────────────────────────────────────────────
     if not os.path.isfile(csv_path):
@@ -154,6 +160,13 @@ def main():
             print(f"ERROR: CSV is missing required columns: {missing}")
             sys.exit(1)
 
+        # Support both "reasoning" and "explanation" as column names
+        reasoning_col = None
+        if "reasoning" in reader.fieldnames:
+            reasoning_col = "reasoning"
+        elif "explanation" in reader.fieldnames:
+            reasoning_col = "explanation"
+
         for row_num, row in enumerate(reader, start=2):  # row 1 = header
             filename = row["image_filename"].strip()
 
@@ -174,11 +187,16 @@ def main():
                 skipped += 1
                 continue
 
+            # Get reasoning/explanation if the column exists
+            reasoning = row.get(reasoning_col, "").strip() if reasoning_col else None
+
             # Build and write sample
             sample = build_sample(
                 image_abs_path=image_path,
                 chaos_tidy=chaos_tidy,
                 monotony_variety=monotony_variety,
+                prompt_string=prompt_string,
+                reasoning=reasoning,
             )
             out_file.write(json.dumps(sample, ensure_ascii=False) + "\n")
             written += 1

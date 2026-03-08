@@ -183,6 +183,12 @@ def train(config: TrainingConfig):
     tokenizer.save_pretrained(config.lora_save_dir)
     print("  Done! LoRA adapter saved successfully.")
 
+    # --- Print Peak GPU Memory Usage ---
+    import torch
+    if torch.cuda.is_available():
+        max_memory = torch.cuda.max_memory_allocated() / (1024 ** 3)
+        print(f"\n[Stats] Peak GPU Memory Allocated: {max_memory:.2f} GB")
+
 
 if __name__ == "__main__":
     args = parse_args()
