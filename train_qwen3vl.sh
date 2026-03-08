@@ -1,12 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=psy_train
+#SBATCH --job-name=qwen3vl_train
 #SBATCH --time=3-00:00:00
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --nodelist=watgpu508,watgpu708,watgpu808,watgpu908,watgpu1008
 
 
 #SBATCH -o logs/JOB%j.out
@@ -35,11 +34,6 @@ echo "Date: $(date)"
 #     --run_name "qwen3_vl_8b_emoart_5k_v1"
 
 # --- 32B model on EmoArt-130k ---
-# srun python src/train.py \
-#     --config recipes/Qwen3-VL-32B.yaml \
-#     --run_name "qwen3_vl_32B_emoart_130k_v1"
-
-# --- Sandbox-001 (Qwen3.5-35B-A3B) ---
 srun python src/train.py \
-    --config recipes/sandbox-001-qwen3.5-35b.yaml \
-    --run_name "sandbox_001_qwen3.5-35b_v1"
+    --config recipes/sandbox-001-qwen3vl32b.yaml \
+    --run_name "sandbox_001_qwen3vl32b_v1"

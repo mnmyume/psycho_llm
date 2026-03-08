@@ -51,27 +51,32 @@ PROMPTS = {
 
 
 # ----- Available Models -----
+# Each entry maps a display name to (model_path, backend)
 MODELS = {
-    "Base Model (8B)": "unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit",
-    "Base Model (32B)": "unsloth/Qwen3-VL-32B-Instruct-unsloth-bnb-4bit",
-    "LoRA (32B EmoArt 130k)": "lora_model/qwen3_vl_32B_emoart_130k_v1",
+    "Base Model (Qwen3.5-35B-A3B)": ("Qwen/Qwen3.5-35B-A3B", "hf"),
+    "LoRA (Sandbox-001)": ("lora_model/sandbox_001", "hf"),
+    "Base Model (Qwen3-VL-32B)": ("unsloth/Qwen3-VL-32B-Instruct-unsloth-bnb-4bit", "unsloth"),
+    "Base Model (Qwen3-VL-8B)": ("unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit", "unsloth"),
 }
 
 # Global variables to cache the currently loaded model and its path
 current_model = None
 current_tokenizer = None
 current_model_path = ""
+current_backend = ""
 
-def load_or_get_model(model_path: str, load_in_4bit: bool = True):
-    global current_model, current_tokenizer, current_model_path
+def load_or_get_model(model_path: str, backend: str = "hf", load_in_4bit: bool = True):
+    global current_model, current_tokenizer, current_model_path, current_backend
     if current_model is None or current_model_path != model_path:
-        print(f"Loading model: {model_path}...")
+        print(f"Loading model: {model_path} (backend={backend})...")
         current_model, current_tokenizer = load_model_for_inference(
             model_path=model_path,
+            backend=backend,
             load_in_4bit=load_in_4bit,
         )
         current_model_path = model_path
-    return current_model, current_tokenizer
+        current_backend = backend
+    return current_model, current_tokenizer, current_backend
 
 
 def create_app(initial_model_path, load_in_4bit):
@@ -98,14 +103,16 @@ def create_app(initial_model_path, load_in_4bit):
 
         try:
             # Dynamically load the model if the selection has changed
-            model_path = MODELS.get(selected_model_key, initial_model_path)
-            model, tokenizer = load_or_get_model(model_path, load_in_4bit)
+            model_entry = MODELS.get(selected_model_key, (initial_model_path, "hf"))
+            model_path, backend = model_entry
+            model, tokenizer, backend = load_or_get_model(model_path, backend, load_in_4bit)
 
             response = generate_response(
                 model=model,
                 tokenizer=tokenizer,
                 image=image,
                 prompt=prompt,
+                backend=backend,
                 max_new_tokens=int(max_tokens),
                 temperature=temperature,
             )
@@ -142,7 +149,7 @@ def create_app(initial_model_path, load_in_4bit):
 
                 model_selector = gr.Dropdown(
                     choices=list(MODELS.keys()),
-                    value="Base Model (8B)" if "8B" in initial_model_path else list(MODELS.keys())[0],
+                    value=list(MODELS.keys())[0],
                     label="🧠 Selected Model",
                     info="If you change this, the new model will be loaded on the first request (which takes a minute).",
                 )

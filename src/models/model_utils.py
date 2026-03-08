@@ -1,43 +1,33 @@
 """
-Model loading and inference utilities for Qwen3-VL with LoRA support.
+Model loading and inference utilities with dual backend support.
 
-This module centralizes all model lifecycle operations:
-  - Loading the base Qwen3-VL model via unsloth
-  - Applying LoRA adapters for training
-  - Loading a fine-tuned LoRA model for inference
-  - Running generation with proper message formatting
+Supports two backends:
+  - "unsloth": Uses FastVisionModel for optimized loading + 4-bit quantization.
+               Best for Qwen3-VL models (dense architectures).
+  - "hf":      Uses standard HuggingFace transformers + PEFT.
+               Required for Qwen3.5 MoE models (BnB can't quantize MoE experts).
 
-The unsloth library provides optimized model loading and LoRA injection
-that is compatible with the standard Hugging Face + PEFT ecosystem.
+The backend is selected via the `backend` field in the training recipe YAML.
 """
 
+import json
+import os
 import torch
 from PIL import Image as PILImage
 from typing import Optional, Tuple
 
-from unsloth import FastVisionModel
 from transformers import TextStreamer
 
 
-def load_base_model(
-    model_name: str,
-    load_in_4bit: bool = True,
-) -> Tuple:
-    """Load a base Qwen3-VL model and its tokenizer.
+# ============================================================
+# Backend: Unsloth (for Qwen3-VL dense models)
+# ============================================================
 
-    Uses unsloth's FastVisionModel for optimized loading with optional
-    4-bit quantization (bitsandbytes NF4) to reduce VRAM usage.
+def _load_unsloth(model_name: str, load_in_4bit: bool = True) -> Tuple:
+    """Load model via Unsloth's FastVisionModel."""
+    from unsloth import FastVisionModel
 
-    Args:
-        model_name: HuggingFace model ID or local path.
-                    Example: "unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit"
-        load_in_4bit: If True, loads model weights in 4-bit NF4 quantization.
-                      This reduces VRAM from ~16GB to ~5GB for the 8B model.
-
-    Returns:
-        Tuple of (model, tokenizer).
-    """
-    print(f"Loading base model: {model_name} (4-bit={load_in_4bit})")
+    print(f"Loading base model [unsloth]: {model_name} (4-bit={load_in_4bit})")
     model, tokenizer = FastVisionModel.from_pretrained(
         model_name,
         load_in_4bit=load_in_4bit,
@@ -46,7 +36,7 @@ def load_base_model(
     return model, tokenizer
 
 
-def apply_lora_for_training(
+def _apply_lora_unsloth(
     model,
     r: int = 16,
     alpha: int = 16,
@@ -56,31 +46,10 @@ def apply_lora_for_training(
     finetune_attention_modules: bool = True,
     finetune_mlp_modules: bool = True,
 ):
-    """Apply LoRA (Low-Rank Adaptation) adapters to the model for training.
+    """Apply LoRA via Unsloth's FastVisionModel."""
+    from unsloth import FastVisionModel
 
-    LoRA works by injecting pairs of small trainable matrices (A and B) into
-    existing model layers. Instead of updating a full weight matrix W (d×d),
-    LoRA learns W + BA where B (d×r) and A (r×d), with r << d.
-
-    This means we only train r*d*2 parameters per layer instead of d*d,
-    achieving ~99% parameter reduction while maintaining quality.
-
-    Args:
-        model: The base model returned by load_base_model().
-        r: LoRA rank. Controls capacity of the low-rank matrices.
-           Higher = more expressive but more parameters. 16 is a good default.
-        alpha: Scaling factor for LoRA. The LoRA output is scaled by alpha/r.
-               Setting alpha = r gives a scaling of 1.0.
-        dropout: Dropout rate on LoRA layers. 0 is fine for most fine-tuning.
-        finetune_vision_layers: Apply LoRA to vision encoder (for image understanding).
-        finetune_language_layers: Apply LoRA to language model layers.
-        finetune_attention_modules: Apply LoRA to Q, K, V, O attention projections.
-        finetune_mlp_modules: Apply LoRA to feed-forward network layers.
-
-    Returns:
-        The model with LoRA adapters applied, set to training mode.
-    """
-    print(f"Applying LoRA adapters (r={r}, alpha={alpha}, dropout={dropout})")
+    print(f"Applying LoRA adapters [unsloth] (r={r}, alpha={alpha}, dropout={dropout})")
     model = FastVisionModel.get_peft_model(
         model,
         finetune_vision_layers=finetune_vision_layers,
@@ -99,27 +68,11 @@ def apply_lora_for_training(
     return model
 
 
-def load_model_for_inference(
-    model_path: str,
-    load_in_4bit: bool = True,
-) -> Tuple:
-    """Load a model for inference, with automatic LoRA detection.
+def _load_unsloth_inference(model_path: str, load_in_4bit: bool = True) -> Tuple:
+    """Load model for inference via Unsloth."""
+    from unsloth import FastVisionModel
 
-    If model_path points to a saved LoRA adapter directory (containing
-    adapter_config.json), unsloth will automatically load the base model
-    and merge the LoRA weights. If it points to a base model, it loads
-    that directly.
-
-    Args:
-        model_path: Path to a saved LoRA adapter directory or a base model ID.
-                    Example LoRA: "lora_model/qwen3_vl_8b_emoart_5k_v1"
-                    Example base: "unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit"
-        load_in_4bit: Whether to load in 4-bit quantization.
-
-    Returns:
-        Tuple of (model, tokenizer) ready for inference.
-    """
-    print(f"Loading model for inference: {model_path}")
+    print(f"Loading model for inference [unsloth]: {model_path}")
     model, tokenizer = FastVisionModel.from_pretrained(
         model_path,
         load_in_4bit=load_in_4bit,
@@ -129,35 +82,8 @@ def load_model_for_inference(
     return model, tokenizer
 
 
-def generate_response(
-    model,
-    tokenizer,
-    image: PILImage.Image,
-    prompt: str,
-    max_new_tokens: int = 4096,
-    temperature: float = 1.5,
-    min_p: float = 0.1,
-    stream: bool = False,
-) -> str:
-    """Generate a psychological analysis response for an image and prompt.
-
-    Constructs a multi-modal chat message with the image and text prompt,
-    tokenizes it using the model's chat template, and runs generation.
-
-    Args:
-        model: The loaded model (base or base + LoRA).
-        tokenizer: The model's tokenizer.
-        image: A PIL Image object (the sandbox drawing or artwork).
-        prompt: The text instruction for the model.
-        max_new_tokens: Maximum number of tokens to generate.
-        temperature: Sampling temperature (higher = more creative).
-        min_p: Minimum probability threshold for sampling.
-        stream: If True, streams output to stdout during generation.
-
-    Returns:
-        The generated text response as a string.
-    """
-    # Build the multi-modal message in Qwen3-VL chat format
+def _generate_unsloth(model, tokenizer, image, prompt, **gen_kwargs) -> str:
+    """Generate response using Unsloth tokenizer API."""
     messages = [
         {
             "role": "user",
@@ -168,12 +94,10 @@ def generate_response(
         }
     ]
 
-    # Apply the chat template to format the message with special tokens
     input_text = tokenizer.apply_chat_template(
         messages, add_generation_prompt=True
     )
 
-    # Tokenize both the image and formatted text together
     inputs = tokenizer(
         image,
         input_text,
@@ -181,22 +105,275 @@ def generate_response(
         return_tensors="pt",
     ).to(model.device)
 
-    # Set up optional streaming
+    stream = gen_kwargs.pop("stream", False)
     streamer = TextStreamer(tokenizer, skip_prompt=True) if stream else None
 
-    # Generate response
     with torch.no_grad():
         output_ids = model.generate(
             **inputs,
             streamer=streamer,
-            max_new_tokens=max_new_tokens,
-            use_cache=True,
-            temperature=temperature,
-            min_p=min_p,
+            **gen_kwargs,
         )
 
-    # Decode only the newly generated tokens (skip the input prompt tokens)
     input_length = inputs["input_ids"].shape[1]
     generated_ids = output_ids[:, input_length:]
     response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
     return response.strip()
+
+
+# ============================================================
+# Backend: HuggingFace (for Qwen3.5 MoE models)
+# ============================================================
+
+def _load_hf(model_name: str, load_in_4bit: bool = False) -> Tuple:
+    """Load model via standard HuggingFace transformers in bf16.
+
+    Note: 4-bit quantization via BitsAndBytes is NOT effective for MoE
+    models (expert layers use custom classes that BnB can't quantize).
+    We always load in bf16 regardless of load_in_4bit.
+    """
+    from transformers import AutoModelForImageTextToText, AutoProcessor
+
+    print(f"Loading base model [hf]: {model_name} (bf16)")
+    model = AutoModelForImageTextToText.from_pretrained(
+        model_name,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+    )
+
+    processor = AutoProcessor.from_pretrained(model_name)
+
+    if hasattr(model, "gradient_checkpointing_enable"):
+        model.gradient_checkpointing_enable()
+
+    return model, processor
+
+
+def _apply_lora_hf(
+    model,
+    r: int = 16,
+    alpha: int = 16,
+    dropout: float = 0.0,
+    finetune_vision_layers: bool = True,
+    finetune_language_layers: bool = True,
+    finetune_attention_modules: bool = True,
+    finetune_mlp_modules: bool = True,
+):
+    """Apply LoRA via standard PEFT library."""
+    from peft import LoraConfig, get_peft_model
+
+    target_modules = []
+    if finetune_attention_modules:
+        target_modules.extend(["q_proj", "k_proj", "v_proj", "o_proj"])
+    if finetune_mlp_modules:
+        target_modules.extend(["gate_proj", "up_proj", "down_proj"])
+
+    if not target_modules:
+        raise ValueError("At least one of finetune_attention_modules or finetune_mlp_modules must be True.")
+
+    # Scope target modules to vision/language layers
+    if finetune_language_layers and not finetune_vision_layers:
+        target_modules = [f"model.layers.*.{m}" for m in target_modules]
+    elif finetune_vision_layers and not finetune_language_layers:
+        target_modules = [f"visual.*.{m}" for m in target_modules]
+
+    print(f"Applying LoRA adapters [hf] (r={r}, alpha={alpha}, dropout={dropout})")
+    print(f"  Target modules: {target_modules}")
+
+    lora_config = LoraConfig(
+        r=r,
+        lora_alpha=alpha,
+        lora_dropout=dropout,
+        target_modules=target_modules,
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+    model.train()
+    return model
+
+
+def _load_hf_inference(model_path: str, load_in_4bit: bool = False) -> Tuple:
+    """Load model for inference via HuggingFace + PEFT."""
+    from peft import PeftModel
+    from transformers import AutoModelForImageTextToText, AutoProcessor
+
+    print(f"Loading model for inference [hf]: {model_path}")
+
+    is_lora = os.path.isfile(os.path.join(model_path, "adapter_config.json"))
+
+    if is_lora:
+        with open(os.path.join(model_path, "adapter_config.json"), "r") as f:
+            adapter_config = json.load(f)
+        base_model_name = adapter_config.get("base_model_name_or_path", model_path)
+
+        print(f"  Detected LoRA adapter. Base model: {base_model_name}")
+        model, processor = _load_hf(base_model_name)
+        model = PeftModel.from_pretrained(model, model_path)
+        print("  LoRA adapter loaded and applied.")
+    else:
+        model, processor = _load_hf(model_path)
+
+    model.eval()
+    print("Model loaded and set to inference mode.")
+    return model, processor
+
+
+def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
+    """Generate response using HuggingFace processor API."""
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "image": image},
+                {"type": "text", "text": prompt},
+            ],
+        }
+    ]
+
+    input_text = processor.apply_chat_template(
+        messages, add_generation_prompt=True, tokenize=False,
+    )
+
+    inputs = processor(
+        text=[input_text],
+        images=[image],
+        padding=True,
+        return_tensors="pt",
+    ).to(model.device)
+
+    stream = gen_kwargs.pop("stream", False)
+    streamer = TextStreamer(processor.tokenizer, skip_prompt=True) if stream else None
+
+    with torch.no_grad():
+        output_ids = model.generate(
+            **inputs,
+            streamer=streamer,
+            **gen_kwargs,
+        )
+
+    input_length = inputs["input_ids"].shape[1]
+    generated_ids = output_ids[:, input_length:]
+    response = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+    return response.strip()
+
+
+# ============================================================
+# Public API — dispatches to the selected backend
+# ============================================================
+
+def load_base_model(
+    model_name: str,
+    backend: str = "hf",
+    load_in_4bit: bool = True,
+) -> Tuple:
+    """Load a base model and its tokenizer/processor.
+
+    Args:
+        model_name: HuggingFace model ID or local path.
+        backend: "unsloth" or "hf".
+        load_in_4bit: Use 4-bit quantization (only effective with unsloth backend).
+
+    Returns:
+        Tuple of (model, tokenizer_or_processor).
+    """
+    if backend == "unsloth":
+        return _load_unsloth(model_name, load_in_4bit)
+    else:
+        return _load_hf(model_name, load_in_4bit)
+
+
+def apply_lora_for_training(
+    model,
+    backend: str = "hf",
+    r: int = 16,
+    alpha: int = 16,
+    dropout: float = 0.0,
+    finetune_vision_layers: bool = True,
+    finetune_language_layers: bool = True,
+    finetune_attention_modules: bool = True,
+    finetune_mlp_modules: bool = True,
+):
+    """Apply LoRA adapters for training.
+
+    Args:
+        model: The base model from load_base_model().
+        backend: "unsloth" or "hf".
+        r, alpha, dropout: LoRA hyperparameters.
+        finetune_*: Which layers to apply LoRA to.
+
+    Returns:
+        Model with LoRA adapters, set to training mode.
+    """
+    kwargs = dict(
+        r=r, alpha=alpha, dropout=dropout,
+        finetune_vision_layers=finetune_vision_layers,
+        finetune_language_layers=finetune_language_layers,
+        finetune_attention_modules=finetune_attention_modules,
+        finetune_mlp_modules=finetune_mlp_modules,
+    )
+    if backend == "unsloth":
+        return _apply_lora_unsloth(model, **kwargs)
+    else:
+        return _apply_lora_hf(model, **kwargs)
+
+
+def load_model_for_inference(
+    model_path: str,
+    backend: str = "hf",
+    load_in_4bit: bool = True,
+) -> Tuple:
+    """Load a model for inference (auto-detects LoRA adapters).
+
+    Args:
+        model_path: Base model ID or path to a LoRA adapter directory.
+        backend: "unsloth" or "hf".
+        load_in_4bit: Use 4-bit quantization (only effective with unsloth backend).
+
+    Returns:
+        Tuple of (model, tokenizer_or_processor).
+    """
+    if backend == "unsloth":
+        return _load_unsloth_inference(model_path, load_in_4bit)
+    else:
+        return _load_hf_inference(model_path, load_in_4bit)
+
+
+def generate_response(
+    model,
+    tokenizer,
+    image: PILImage.Image,
+    prompt: str,
+    backend: str = "hf",
+    max_new_tokens: int = 4096,
+    temperature: float = 1.5,
+    min_p: float = 0.1,
+    stream: bool = False,
+) -> str:
+    """Generate a response for an image and text prompt.
+
+    Args:
+        model: The loaded model.
+        tokenizer: The tokenizer (unsloth) or processor (hf).
+        image: A PIL Image object.
+        prompt: Text instruction for the model.
+        backend: "unsloth" or "hf".
+        max_new_tokens, temperature, min_p: Generation parameters.
+        stream: If True, streams output to stdout.
+
+    Returns:
+        The generated text response.
+    """
+    gen_kwargs = dict(
+        max_new_tokens=max_new_tokens,
+        use_cache=True,
+        temperature=temperature,
+        min_p=min_p,
+        stream=stream,
+    )
+    if backend == "unsloth":
+        return _generate_unsloth(model, tokenizer, image, prompt, **gen_kwargs)
+    else:
+        return _generate_hf(model, tokenizer, image, prompt, **gen_kwargs)

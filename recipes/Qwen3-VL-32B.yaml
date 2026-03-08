@@ -10,6 +10,7 @@
 
 # --- Model ---
 model_name: unsloth/Qwen3-VL-32B-Instruct-unsloth-bnb-4bit
+backend: unsloth
 load_in_4bit: true
 
 # --- Dataset ---

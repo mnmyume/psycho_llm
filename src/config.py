@@ -54,7 +54,8 @@ class TrainingConfig:
     """
 
     # --- Model ---
-    model_name: str = "unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit"
+    model_name: str = "Qwen/Qwen3.5-35B-A3B"
+    backend: str = "hf"  # "unsloth" or "hf"
     load_in_4bit: bool = True
 
     # --- Dataset ---

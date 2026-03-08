@@ -79,6 +79,10 @@ def parse_args():
         help="Disable 4-bit quantization (use 16-bit instead).",
     )
     parser.add_argument(
+        "--backend", type=str, default="hf", choices=["unsloth", "hf"],
+        help="Model backend: 'unsloth' for Qwen3-VL, 'hf' for Qwen3.5.",
+    )
+    parser.add_argument(
         "--stream", action="store_true",
         help="Stream output tokens to stdout as they are generated.",
     )
@@ -99,6 +103,7 @@ def run_inference(args):
     # Load the model (automatically detects if it's a LoRA adapter or base model)
     model, tokenizer = load_model_for_inference(
         model_path=args.model_path,
+        backend=args.backend,
         load_in_4bit=not args.no_4bit,
     )
 
@@ -111,6 +116,7 @@ def run_inference(args):
         tokenizer=tokenizer,
         image=image,
         prompt=args.prompt,
+        backend=args.backend,
         max_new_tokens=args.max_tokens,
         temperature=args.temperature,
         min_p=args.min_p,
