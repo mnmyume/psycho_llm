@@ -38,6 +38,7 @@ os.environ["GRADIO_TEMP_DIR"] = os.path.join(os.path.expanduser("~"), ".gradio_t
 import gradio as gr
 
 from models.model_utils import load_model_for_inference, generate_response
+from prompts import EXPERT_REASONING_PROMPT
 
 
 # ----- Default Prompts -----
@@ -49,12 +50,7 @@ PROMPTS = {
         "\"structural_assessment\": A short phrase (2-6 words) describing both dimensions of the path (e.g., \"simple and continuous\", \"complex but completely smooth\", \"complicated and highly fragmented\").\n"
         "\"brief_explanation\": A 1-2 sentence justification based purely on the path's visual connectivity, layout, and intricacy."
     ),
-    "🏖️ Sandbox Scoring": (
-        "Analyze this isometric sandbox image. Rate it on two dimensions from 1 to 5. "
-        "Dimension 1: Chaos to Tidy (1=chaotic/fragmented, 5=tidy/smooth). "
-        "Dimension 2: Monotony to Variety (1=monotonous/simple, 5=variety/complicated). "
-        "Output strict JSON with keys 'chaos_tidy_score' and 'monotony_variety_score'."
-    ),
+    "🏖️ Sandbox Scoring": EXPERT_REASONING_PROMPT,
     "✏️ Custom Prompt": "",
 }
 
@@ -62,7 +58,7 @@ PROMPTS = {
 # ----- Available Models -----
 # Each entry maps a display name to (model_path, backend)
 MODELS = {
-    "LoRA (Sandbox-001-Qwen3.5-9B)": ("lora_model/sandbox_001_qwen3.5-9b_v1", "hf"),
+    "LoRA (Sandbox-001-Qwen3.5-9B)": ("lora_model/sandbox_001_qwen3.5-9b_v2", "hf"),
     "LoRA (Sandbox-001-Qwen3-VL-32B)": ("lora_model/sandbox_001_qwen3vl32b_v1", "unsloth"),
     "Base Model (Qwen3.5-35B-A3B)": ("Qwen/Qwen3.5-35B-A3B", "hf"),
     "Base Model (Qwen3-VL-32B)": ("unsloth/Qwen3-VL-32B-Instruct-unsloth-bnb-4bit", "unsloth"),
@@ -186,7 +182,7 @@ def create_app(initial_model_path, load_in_4bit):
                         info="Higher = more creative, Lower = more focused",
                     )
                     max_tokens = gr.Slider(
-                        minimum=256, maximum=8192, value=4096, step=256,
+                        minimum=256, maximum=32768, value=8192, step=256,
                         label="Max Tokens",
                         info="Maximum length of the generated response",
                     )

@@ -90,7 +90,7 @@ class TrainingConfig:
     seed: int = 3407
 
     # --- Inference ---
-    inference_max_tokens: int = 4096
+    inference_max_tokens: int = 8192
     inference_temperature: float = 1.5
     inference_min_p: float = 0.1
 

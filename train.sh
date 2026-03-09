@@ -46,4 +46,4 @@ echo "Date: $(date)"
 # --- Sandbox-001 (Qwen3.5-9B) ---
 srun python src/train.py \
     --config recipes/sandbox-001-qwen3.5-9b.yaml \
-    --run_name "sandbox_001_qwen3.5-9b_v1"
+    --run_name "sandbox_001_qwen3.5-9b_v3"
