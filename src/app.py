@@ -58,7 +58,7 @@ PROMPTS = {
 # ----- Available Models -----
 # Each entry maps a display name to (model_path, backend)
 MODELS = {
-    "LoRA (Sandbox-001-Qwen3.5-9B)": ("lora_model/sandbox_001_qwen3.5-9b_v2", "hf"),
+    "LoRA (Sandbox-001-Qwen3.5-9B)": ("lora_model/sandbox_001_qwen3.5-9b_v5", "hf"),
     "LoRA (Sandbox-001-Qwen3-VL-32B)": ("lora_model/sandbox_001_qwen3vl32b_v1", "unsloth"),
     "Base Model (Qwen3.5-35B-A3B)": ("Qwen/Qwen3.5-35B-A3B", "hf"),
     "Base Model (Qwen3-VL-32B)": ("unsloth/Qwen3-VL-32B-Instruct-unsloth-bnb-4bit", "unsloth"),
@@ -96,7 +96,7 @@ def create_app(initial_model_path, load_in_4bit):
         A Gradio Blocks app ready to launch.
     """
 
-    def analyze_image(image, prompt_type, custom_prompt, temperature, max_tokens, selected_model_key):
+    def analyze_image(image, prompt_type, custom_prompt, temperature, max_tokens, thinking_budget, selected_model_key):
         """Process an uploaded image and return the model's analysis."""
         if image is None:
             return "⚠️ Please upload an image first."
@@ -121,6 +121,7 @@ def create_app(initial_model_path, load_in_4bit):
                 backend=backend,
                 max_new_tokens=int(max_tokens),
                 temperature=temperature,
+                thinking_budget=int(thinking_budget) if thinking_budget else None,
             )
             return response
         except Exception as e:
@@ -186,6 +187,11 @@ def create_app(initial_model_path, load_in_4bit):
                         label="Max Tokens",
                         info="Maximum length of the generated response",
                     )
+                    thinking_budget = gr.Slider(
+                        minimum=0, maximum=2048, value=512, step=64,
+                        label="Thinking Budget (Qwen3.5 only)",
+                        info="Max thinking tokens. 0 = disable thinking for fastest response.",
+                    )
 
                 analyze_btn = gr.Button(
                     "🔍 Analyze Image",
@@ -209,7 +215,7 @@ def create_app(initial_model_path, load_in_4bit):
 
         analyze_btn.click(
             fn=analyze_image,
-            inputs=[image_input, prompt_type, custom_prompt, temperature, max_tokens, model_selector],
+            inputs=[image_input, prompt_type, custom_prompt, temperature, max_tokens, thinking_budget, model_selector],
             outputs=[output],
         )
 

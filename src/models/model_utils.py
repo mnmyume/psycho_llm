@@ -223,6 +223,12 @@ def _load_hf_inference(model_path: str, load_in_4bit: bool = False) -> Tuple:
 
 def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
     """Generate response using HuggingFace processor API."""
+    import re
+
+    # Pop thinking_budget before passing to model.generate()
+    thinking_budget = gen_kwargs.pop("thinking_budget", None)
+    enable_thinking = thinking_budget is not None and thinking_budget > 0
+
     messages = [
         {
             "role": "user",
@@ -234,7 +240,10 @@ def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
     ]
 
     input_text = processor.apply_chat_template(
-        messages, add_generation_prompt=True, tokenize=False,
+        messages,
+        add_generation_prompt=True,
+        tokenize=False,
+        enable_thinking=enable_thinking,
     )
 
     inputs = processor(
@@ -256,6 +265,10 @@ def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
         if isinstance(getattr(gc, "pad_token_id", None), set):
             gc.pad_token_id = list(gc.pad_token_id)
 
+    # If thinking is enabled, cap the thinking token budget
+    if enable_thinking and thinking_budget:
+        gen_kwargs["thinking_budget"] = thinking_budget
+
     with torch.no_grad():
         output_ids = model.generate(
             **inputs,
@@ -266,6 +279,9 @@ def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
     input_length = inputs["input_ids"].shape[1]
     generated_ids = output_ids[:, input_length:]
     response = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+
+    # Strip <think>...</think> blocks so the user only sees the final answer
+    response = re.sub(r"<think>.*?</think>\s*", "", response, flags=re.DOTALL)
     return response.strip()
 
 
@@ -360,6 +376,7 @@ def generate_response(
     temperature: float = 1.5,
     min_p: float = 0.1,
     stream: bool = False,
+    thinking_budget: Optional[int] = 512,
 ) -> str:
     """Generate a response for an image and text prompt.
 
@@ -371,6 +388,8 @@ def generate_response(
         backend: "unsloth" or "hf".
         max_new_tokens, temperature, min_p: Generation parameters.
         stream: If True, streams output to stdout.
+        thinking_budget: Max tokens for Qwen3.5 thinking (hf backend only).
+            Set to 0 or None to disable thinking entirely. Default: 512.
 
     Returns:
         The generated text response.
@@ -385,4 +404,5 @@ def generate_response(
     if backend == "unsloth":
         return _generate_unsloth(model, tokenizer, image, prompt, **gen_kwargs)
     else:
+        gen_kwargs["thinking_budget"] = thinking_budget
         return _generate_hf(model, tokenizer, image, prompt, **gen_kwargs)
