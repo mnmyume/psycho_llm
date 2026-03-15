@@ -26,8 +26,10 @@ Usage:
 """
 
 import argparse
+import gc
 import os
 import sys
+import torch
 
 # Ensure the src/ directory is on the Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -43,6 +45,7 @@ from prompts import EXPERT_REASONING_PROMPT
 
 # ----- Default Prompts -----
 PROMPTS = {
+    "🏖️ Sandbox Scoring": EXPERT_REASONING_PROMPT,
     "❄️ Cleanness Testing": (
         "Analyze the brown path in this isometric image across two dimensions: \"clean vs. chaotic\" (organized/continuous vs. fragmented/broken) and \"simple vs. complicated\" (basic/few turns vs. intricate/branching/winding).\n"
         "Focus ONLY on the brown path. Continuity is determined strictly by whether the path connects; a path is continuous if it is unbroken, even if it divides the white snow into separate, disconnected fields.\n"
@@ -50,7 +53,6 @@ PROMPTS = {
         "\"structural_assessment\": A short phrase (2-6 words) describing both dimensions of the path (e.g., \"simple and continuous\", \"complex but completely smooth\", \"complicated and highly fragmented\").\n"
         "\"brief_explanation\": A 1-2 sentence justification based purely on the path's visual connectivity, layout, and intricacy."
     ),
-    "🏖️ Sandbox Scoring": EXPERT_REASONING_PROMPT,
     "✏️ Custom Prompt": "",
 }
 
@@ -74,6 +76,16 @@ current_backend = ""
 def load_or_get_model(model_path: str, backend: str = "hf", load_in_4bit: bool = True):
     global current_model, current_tokenizer, current_model_path, current_backend
     if current_model is None or current_model_path != model_path:
+        # Clear old model from memory before loading the new one
+        if current_model is not None:
+            print("Clearing previous model from VRAM...")
+            del current_model
+            del current_tokenizer
+            current_model = None
+            current_tokenizer = None
+            gc.collect()
+            torch.cuda.empty_cache()
+
         print(f"Loading model: {model_path} (backend={backend})...")
         current_model, current_tokenizer = load_model_for_inference(
             model_path=model_path,
@@ -178,7 +190,7 @@ def create_app(initial_model_path, load_in_4bit):
 
                 with gr.Accordion("⚙️ Generation Settings", open=False):
                     temperature = gr.Slider(
-                        minimum=0.1, maximum=2.0, value=1.5, step=0.1,
+                        minimum=0.1, maximum=2.0, value=0.7, step=0.1,
                         label="Temperature",
                         info="Higher = more creative, Lower = more focused",
                     )

@@ -14,16 +14,18 @@ BASIC_PROMPT = (
 EXPERT_REASONING_PROMPT = """Task:
 You are an expert spatial and environmental analyzer evaluating isometric sandbox images. Rate the image on two dimensions on a scale of 1 to 3.
 
-CRITICAL INSTRUCTION: Do not judge "Tidy" or "Moderate" based on whether the image looks like a clean pixel-art asset or an aligned grid. Base your score STRICTLY on the physical, touching connectivity of the path.
+CRITICAL INSTRUCTION: Do not judge "Tidy" or "Moderate" based on whether the image looks like a clean pixel-art asset or an aligned grid. Base your score STRICTLY on the overall macro-connectivity of the brown path.
 
 Dimension 1: Chaos (1) to Tidy (3)
 Evaluate the structural integrity, flow, and physical connection of the brown paths.
 
-Score 1 (Chaotic): The path is severely shattered or fragmented. KNOCK-OUT RULE: If the path consists of multiple completely isolated brown squares (islands), scattered blocks, or is broken into many disconnected segments that do not physically touch, it MUST be a 1. Do NOT upgrade to a 2 just because the disconnected blocks align to an isometric grid or look like a "map". If it is a collection of islands, it is a 1.
+Important Caveat on Texture: Treat the brown path as a solid object. Do NOT interpret the internal cobblestone/dirt pixel texture as "gaps" or "breaks."
 
-Score 2 (Moderate): The path is mostly continuous and traceable as a single main line, but suffers from a specific structural flaw. It must physically connect for most of the image, but might suffer from a noticeable gap, an interruption (like steps breaking the dirt line), or stop abruptly at a single dead end instead of finishing its route.
+Score 1 (Chaotic): The path is severely shattered or fragmented at a macro level. KNOCK-OUT RULE: If the path consists of multiple completely isolated brown squares (islands), scattered blocks, or is broken into many disconnected segments separated by snow that do not physically touch, it MUST be a 1. Do NOT upgrade to a 2 just because the disconnected blocks align to an isometric grid. If it is a collection of islands, it is a 1.
 
-Score 3 (Tidy): The layout is highly intentional and structured. The path is 100% continuous and flawless. It must travel entirely from edge-to-edge or form a complete connected loop with ZERO dead ends and ZERO breaks.
+Score 2 (Moderate): The path is mostly continuous and traceable as a single main line, but suffers from a specific macro-structural flaw. It must physically connect for most of the image, but suffers from a noticeable gap, an interruption (like steps breaking the dirt line), or stops abruptly at a single dead end in the middle of the snow instead of finishing its route.
+
+Score 3 (Tidy): The layout is highly intentional and structured. The path is 100% continuous and flawless. It forms a complete connected loop or travels entirely across the terrain block (exiting the visible terrain boundaries) with ZERO dead ends, ZERO breaks, and ZERO isolated islands. Clear, continuous crossroads (like an X or + shape) are Score 3.
 
 Dimension 2: Monotony (1) to Variety (3)
 Evaluate the diversity of the environmental elements.
@@ -32,10 +34,10 @@ Score 1 (Monotonous): The environment is barren. It consists of 0 distinct asset
 
 Score 2 (Moderate): The environment introduces exactly 1 type of asset, such as a single uniform species of tree, or minor terrain variations (raised dirt blocks/steps), but remains visually straightforward.
 
-Score 3 (Variety): The environment is rich. Look for 2 or more distinct elements coexisting: different types of vegetation (e.g., combining tall pines and frosted trees), water features, or prominent terrain elevation.
+Score 3 (Variety): The environment is rich. Look for 2 or more distinct elements coexisting: different types of vegetation (e.g., combining tall pines and frosted trees), water features, or prominent terrain elevation (large snow mounds or raised platforms).
 
 Evaluation Process:
-First, trace the brown paths. Is it a collection of shattered islands (1), a mostly connected line with a flaw/dead-end (2), or perfectly continuous (3)? Ignore implied grids.
+First, trace the macroscopic brown path. Is it a collection of shattered islands separated by snow (1), a mostly connected line with a flaw/dead-end (2), or perfectly continuous with zero dead ends (3)? Ignore the internal pixel texture of the dirt.
 Second, inventory the elements. How many different types of assets (trees, water, elevation) are present?
 
 Output Format:

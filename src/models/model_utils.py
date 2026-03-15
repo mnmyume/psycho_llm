@@ -253,6 +253,11 @@ def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
         return_tensors="pt",
     ).to(model.device)
 
+    # Ensure float tensors (like pixel_values) match the model's dtype (e.g., bfloat16)
+    for k, v in inputs.items():
+        if torch.is_floating_point(v):
+            inputs[k] = v.to(model.dtype)
+
     stream = gen_kwargs.pop("stream", False)
     streamer = TextStreamer(processor.tokenizer, skip_prompt=True) if stream else None
 
@@ -264,10 +269,6 @@ def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
             gc.eos_token_id = list(gc.eos_token_id)
         if isinstance(getattr(gc, "pad_token_id", None), set):
             gc.pad_token_id = list(gc.pad_token_id)
-
-    # If thinking is enabled, cap the thinking token budget
-    if enable_thinking and thinking_budget:
-        gen_kwargs["thinking_budget"] = thinking_budget
 
     with torch.no_grad():
         output_ids = model.generate(
@@ -377,6 +378,7 @@ def generate_response(
     min_p: float = 0.1,
     stream: bool = False,
     thinking_budget: Optional[int] = 512,
+    repetition_penalty: float = 1.2,
 ) -> str:
     """Generate a response for an image and text prompt.
 
@@ -390,6 +392,8 @@ def generate_response(
         stream: If True, streams output to stdout.
         thinking_budget: Max tokens for Qwen3.5 thinking (hf backend only).
             Set to 0 or None to disable thinking entirely. Default: 512.
+        repetition_penalty: Penalizes repeated tokens (>1.0 = less repetition).
+            Default: 1.2.
 
     Returns:
         The generated text response.
@@ -400,6 +404,7 @@ def generate_response(
         temperature=temperature,
         min_p=min_p,
         stream=stream,
+        repetition_penalty=repetition_penalty,
     )
     if backend == "unsloth":
         return _generate_unsloth(model, tokenizer, image, prompt, **gen_kwargs)
