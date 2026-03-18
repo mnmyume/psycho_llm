@@ -48,8 +48,26 @@ Output strictly raw JSON. Do not use markdown blocks. Use the reasoning key to b
 "monotony_variety_score": [Insert integer 1-3]
 }"""
 
+GRID_TEST_PROMPT="""
+You are given an isometric 8x8 grid image with exactly one selected cell.
+Return the location of that selected cell as grid indices, not pixel coordinates.
+
+Coordinate rules:
+- The topmost cell is [0, 0].
+- Moving along the right edge direction increases x by 1.
+- Moving along the left edge direction increases y by 1.
+- Both x and y must be integers in the range 0 to 7.
+- Do not output image-space coordinates such as pixel positions.
+
+Output Format:
+Output strictly raw JSON. Do not use markdown blocks. 
+{
+"coordinates": [x, y]
+}"""
+
 # A dictionary to easily look up prompts by name
 PROMPTS = {
     "basic": BASIC_PROMPT,
     "expert_reasoning": EXPERT_REASONING_PROMPT,
+    "grid_test": GRID_TEST_PROMPT,
 }

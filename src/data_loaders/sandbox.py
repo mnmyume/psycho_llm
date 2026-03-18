@@ -53,6 +53,18 @@ class SandboxDataset(BaseDataset):
             2. Extract the image path from the messages structure
             3. Cast the image column for automatic PIL loading
         """
+        if not os.path.isfile(self.path):
+            raise FileNotFoundError(
+                f"Dataset JSONL not found: {self.path}. "
+                "Generate it with src/data_prep.py before training."
+            )
+
+        if os.path.getsize(self.path) == 0:
+            raise ValueError(
+                f"Dataset JSONL is empty: {self.path}. "
+                "Regenerate it with src/data_prep.py before training."
+            )
+
         hf_dataset = load_dataset(
             "json",
             data_files=self.path,

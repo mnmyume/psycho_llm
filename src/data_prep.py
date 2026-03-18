@@ -1,7 +1,7 @@
 """
-Dataset preparation script for sandbox image fine-tuning.
+Dataset preparation script for image fine-tuning datasets.
 
-Reads a CSV of image filenames + scores and produces a JSONL file in the
+Reads a CSV of image filenames + annotations and produces a JSONL file in the
 Qwen3-VL multimodal chat format expected by SFTTrainer.
 
 Usage:
@@ -10,13 +10,17 @@ Usage:
 
     # Custom paths:
     python src/data_prep.py \
-        --csv_path   dataset/sandbox-001/annotations.csv \
-        --image_dir  dataset/sandbox-001/images \
-        --output     dataset/sandbox-001/train_dataset.jsonl
+        --csv_path   dataset/grid-001/annotations.csv \
+        --image_dir  dataset/grid-001/images \
+        --output     dataset/grid-001/train_dataset.jsonl \
+        --prompt_name grid_test
 
-CSV schema:
-    image_filename,chaos_tidy_score,monotony_variety_score
-    my_image.png,3,4
+Supported CSV schemas:
+    image_filename,chaos_tidy_score,monotony_variety_score[,reasoning|explanation]
+    my_image.png,3,2,...
+
+    image_filename,coordinates
+    my_image.png,"(2, 4)"
 """
 
 import argparse
@@ -81,7 +85,46 @@ def validate_score(value: str, column_name: str, row_num: int) -> int | None:
     return score
 
 
-def build_sample(image_abs_path: str, chaos_tidy: int, monotony_variety: int, prompt_string: str, reasoning: str | None = None) -> dict:
+def validate_coordinates(value: str, row_num: int) -> list[int] | None:
+    """Validate coordinate strings in the form '(x,y)' or '(x, y)'."""
+    if value is None:
+        print(f"  ⚠  Row {row_num}: 'coordinates' is missing")
+        return None
+
+    text = value.strip()
+    if not (text.startswith("(") and text.endswith(")")):
+        print(f"  ⚠  Row {row_num}: invalid coordinates format: {value!r}")
+        return None
+
+    parts = [part.strip() for part in text[1:-1].split(",")]
+    if len(parts) != 2:
+        print(f"  ⚠  Row {row_num}: invalid coordinates format: {value!r}")
+        return None
+
+    try:
+        x = int(parts[0])
+        y = int(parts[1])
+    except ValueError:
+        print(f"  ⚠  Row {row_num}: coordinates must be integers: {value!r}")
+        return None
+
+    return [x, y]
+
+
+def detect_annotation_schema(fieldnames: list[str] | None) -> str | None:
+    """Detect which annotation schema the CSV uses."""
+    if not fieldnames:
+        return None
+
+    fields = set(fieldnames)
+    if {"image_filename", "chaos_tidy_score", "monotony_variety_score"}.issubset(fields):
+        return "scores"
+    if {"image_filename", "coordinates"}.issubset(fields):
+        return "coordinates"
+    return None
+
+
+def build_sample(image_abs_path: str, response_payload: dict, prompt_string: str) -> dict:
     """Build a single JSONL sample in the Qwen3-VL multimodal chat format.
 
     The format mirrors the existing EmoArt data loader:
@@ -90,15 +133,8 @@ def build_sample(image_abs_path: str, chaos_tidy: int, monotony_variety: int, pr
           {role: assistant,  content: [{type: text, ...}]},
       ]
     """
-    response_dict = {}
-    if reasoning:
-        response_dict["reasoning"] = reasoning
-        
-    response_dict["chaos_tidy_score"] = chaos_tidy
-    response_dict["monotony_variety_score"] = monotony_variety
-    
     response_json = json.dumps(
-        response_dict,
+        response_payload,
         ensure_ascii=False,
     )
 
@@ -136,7 +172,7 @@ def main():
         sys.exit(1)
 
     print("=" * 60)
-    print("  Psycho LLM — Sandbox Dataset Preparation")
+    print("  Psycho LLM — Dataset Preparation")
     print(f"  CSV:       {csv_path}")
     print(f"  Images:    {image_dir}")
     print(f"  Output:    {output_path}")
@@ -153,14 +189,18 @@ def main():
 
         reader = csv.DictReader(csv_file)
 
-        # Verify expected columns exist
-        required_cols = {"image_filename", "chaos_tidy_score", "monotony_variety_score"}
-        if reader.fieldnames is None or not required_cols.issubset(set(reader.fieldnames)):
-            missing = required_cols - set(reader.fieldnames or [])
-            print(f"ERROR: CSV is missing required columns: {missing}")
+        schema = detect_annotation_schema(reader.fieldnames)
+        if schema is None:
+            print(
+                "ERROR: CSV schema not recognized. Expected either "
+                "{image_filename, chaos_tidy_score, monotony_variety_score} "
+                "or {image_filename, coordinates}."
+            )
             sys.exit(1)
 
-        # Support both "reasoning" and "explanation" as column names
+        print(f"  Schema:    {schema}")
+
+        # Support both "reasoning" and "explanation" as optional columns
         reasoning_col = None
         if "reasoning" in reader.fieldnames:
             reasoning_col = "reasoning"
@@ -177,26 +217,36 @@ def main():
                 skipped += 1
                 continue
 
-            # Validate scores
-            chaos_tidy = validate_score(row["chaos_tidy_score"], "chaos_tidy_score", row_num)
-            monotony_variety = validate_score(
-                row["monotony_variety_score"], "monotony_variety_score", row_num,
-            )
+            if schema == "scores":
+                chaos_tidy = validate_score(row["chaos_tidy_score"], "chaos_tidy_score", row_num)
+                monotony_variety = validate_score(
+                    row["monotony_variety_score"], "monotony_variety_score", row_num,
+                )
 
-            if chaos_tidy is None or monotony_variety is None:
-                skipped += 1
-                continue
+                if chaos_tidy is None or monotony_variety is None:
+                    skipped += 1
+                    continue
 
-            # Get reasoning/explanation if the column exists
-            reasoning = row.get(reasoning_col, "").strip() if reasoning_col else None
+                response_payload = {
+                    "chaos_tidy_score": chaos_tidy,
+                    "monotony_variety_score": monotony_variety,
+                }
+                reasoning = row.get(reasoning_col, "").strip() if reasoning_col else None
+                if reasoning:
+                    response_payload["reasoning"] = reasoning
+            else:
+                coordinates = validate_coordinates(row["coordinates"], row_num)
+                if coordinates is None:
+                    skipped += 1
+                    continue
+
+                response_payload = {"coordinates": coordinates}
 
             # Build and write sample
             sample = build_sample(
                 image_abs_path=image_path,
-                chaos_tidy=chaos_tidy,
-                monotony_variety=monotony_variety,
+                response_payload=response_payload,
                 prompt_string=prompt_string,
-                reasoning=reasoning,
             )
             out_file.write(json.dumps(sample, ensure_ascii=False) + "\n")
             written += 1

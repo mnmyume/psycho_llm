@@ -40,26 +40,21 @@ os.environ["GRADIO_TEMP_DIR"] = os.path.join(os.path.expanduser("~"), ".gradio_t
 import gradio as gr
 
 from models.model_utils import load_model_for_inference, generate_response
-from prompts import EXPERT_REASONING_PROMPT
+from prompts import EXPERT_REASONING_PROMPT, GRID_TEST_PROMPT
 
 
 # ----- Default Prompts -----
 PROMPTS = {
-    "🏖️ Sandbox Scoring": EXPERT_REASONING_PROMPT,
-    "❄️ Cleanness Testing": (
-        "Analyze the brown path in this isometric image across two dimensions: \"clean vs. chaotic\" (organized/continuous vs. fragmented/broken) and \"simple vs. complicated\" (basic/few turns vs. intricate/branching/winding).\n"
-        "Focus ONLY on the brown path. Continuity is determined strictly by whether the path connects; a path is continuous if it is unbroken, even if it divides the white snow into separate, disconnected fields.\n"
-        "Output strictly raw JSON (no markdown formatting) with exactly two keys:\n"
-        "\"structural_assessment\": A short phrase (2-6 words) describing both dimensions of the path (e.g., \"simple and continuous\", \"complex but completely smooth\", \"complicated and highly fragmented\").\n"
-        "\"brief_explanation\": A 1-2 sentence justification based purely on the path's visual connectivity, layout, and intricacy."
-    ),
-    "✏️ Custom Prompt": "",
+    "Sandbox Scoring": EXPERT_REASONING_PROMPT,
+    "Grid Cell Selection": GRID_TEST_PROMPT,
+    "Custom Prompt": "",
 }
 
 
 # ----- Available Models -----
 # Each entry maps a display name to (model_path, backend)
 MODELS = {
+    "LoRA (Grid-001-Qwen3.5-9B)": ("lora_model/grid_001_qwen3.5-9b_v3", "hf"),
     "LoRA (Sandbox-001-Qwen3.5-9B)": ("lora_model/sandbox_001_qwen3.5-9b_v5", "hf"),
     "LoRA (Sandbox-001-Qwen3-VL-32B)": ("lora_model/sandbox_001_qwen3vl32b_v1", "unsloth"),
     "Base Model (Qwen3.5-35B-A3B)": ("Qwen/Qwen3.5-35B-A3B", "hf"),
@@ -111,13 +106,13 @@ def create_app(initial_model_path, load_in_4bit):
     def analyze_image(image, prompt_type, custom_prompt, temperature, max_tokens, thinking_budget, selected_model_key):
         """Process an uploaded image and return the model's analysis."""
         if image is None:
-            return "⚠️ Please upload an image first."
+            return "Please upload an image first."
 
         # Use custom prompt if selected, otherwise use the preset
-        prompt = custom_prompt if prompt_type == "✏️ Custom Prompt" else PROMPTS[prompt_type]
+        prompt = custom_prompt if prompt_type == "Custom Prompt" else PROMPTS[prompt_type]
 
         if not prompt.strip():
-            return "⚠️ Please enter a prompt."
+            return "Please enter a prompt."
 
         try:
             # Dynamically load the model if the selection has changed
@@ -139,11 +134,11 @@ def create_app(initial_model_path, load_in_4bit):
         except Exception as e:
             import traceback
             traceback.print_exc()
-            return f"❌ Error during analysis: {str(e)}"
+            return f"Error during analysis: {str(e)}"
 
     def update_prompt_visibility(prompt_type):
         """Show/hide the custom prompt textbox based on selection."""
-        if prompt_type == "✏️ Custom Prompt":
+        if prompt_type == "Custom Prompt":
             return gr.update(visible=True)
         return gr.update(visible=False)
 
@@ -154,7 +149,7 @@ def create_app(initial_model_path, load_in_4bit):
         # Header
         gr.HTML("""
             <div class="main-header">
-                <h1>🧠 Psycho LLM</h1>
+                <h1>Psycho LLM</h1>
                 <p>Upload a sandbox drawing or artwork for AI-powered psychological analysis</p>
             </div>
         """)
@@ -163,7 +158,7 @@ def create_app(initial_model_path, load_in_4bit):
             # Left column: inputs
             with gr.Column(scale=1):
                 image_input = gr.Image(
-                    label="📷 Upload Image",
+                    label="Upload Image",
                     type="pil",
                     height=400,
                 )
@@ -171,24 +166,24 @@ def create_app(initial_model_path, load_in_4bit):
                 model_selector = gr.Dropdown(
                     choices=list(MODELS.keys()),
                     value=list(MODELS.keys())[0],
-                    label="🧠 Selected Model",
+                    label="Selected Model",
                     info="If you change this, the new model will be loaded on the first request (which takes a minute).",
                 )
 
                 prompt_type = gr.Dropdown(
                     choices=list(PROMPTS.keys()),
-                    value="❄️ Cleanness Testing",
-                    label="🔮 Analysis Type",
+                    value="Grid Cell Selection",
+                    label="Analysis Type",
                 )
 
                 custom_prompt = gr.Textbox(
-                    label="✏️ Custom Prompt",
+                    label="Custom Prompt",
                     placeholder="Enter your custom analysis prompt...",
                     lines=3,
                     visible=False,
                 )
 
-                with gr.Accordion("⚙️ Generation Settings", open=False):
+                with gr.Accordion("Generation Settings", open=False):
                     temperature = gr.Slider(
                         minimum=0.1, maximum=2.0, value=0.7, step=0.1,
                         label="Temperature",
@@ -200,13 +195,13 @@ def create_app(initial_model_path, load_in_4bit):
                         info="Maximum length of the generated response",
                     )
                     thinking_budget = gr.Slider(
-                        minimum=0, maximum=2048, value=512, step=64,
+                        minimum=0, maximum=2048, value=0, step=64,
                         label="Thinking Budget (Qwen3.5 only)",
                         info="Max thinking tokens. 0 = disable thinking for fastest response.",
                     )
 
                 analyze_btn = gr.Button(
-                    "🔍 Analyze Image",
+                    "Analyze Image",
                     variant="primary",
                     size="lg",
                 )
@@ -214,7 +209,7 @@ def create_app(initial_model_path, load_in_4bit):
             # Right column: output
             with gr.Column(scale=1):
                 output = gr.Textbox(
-                    label="📋 Analysis Result",
+                    label="Analysis Result",
                     lines=25,
                 )
 
