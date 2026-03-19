@@ -248,6 +248,7 @@ def _apply_lora_hf(
 def _load_hf_inference(model_path: str, load_in_4bit: bool = False) -> Tuple:
     """Load model for inference via HuggingFace + PEFT."""
     from peft import PeftModel
+    from transformers import AutoProcessor
 
     print(f"Loading model for inference [hf]: {model_path}")
 
@@ -259,8 +260,16 @@ def _load_hf_inference(model_path: str, load_in_4bit: bool = False) -> Tuple:
         base_model_name = adapter_config.get("base_model_name_or_path", model_path)
 
         print(f"  Detected LoRA adapter. Base model: {base_model_name}")
-        model, processor = _load_hf(base_model_name)
+        model, _ = _load_hf(base_model_name)
         model = PeftModel.from_pretrained(model, model_path)
+        # Prefer processor/tokenizer from adapter dir so chat template changes
+        # (including thinking behavior) are preserved after fine-tuning.
+        try:
+            processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+            print("  Loaded processor from LoRA adapter directory.")
+        except Exception:
+            processor = AutoProcessor.from_pretrained(base_model_name, trust_remote_code=True)
+            print("  Adapter processor not found; using base model processor.")
         print("  LoRA adapter loaded and applied.")
     else:
         model, processor = _load_hf(model_path)
@@ -274,11 +283,31 @@ def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
     """Generate response using HuggingFace processor API."""
     import re
 
-    # Pop thinking_budget before passing to model.generate()
+    # Extract thinking controls.
+    # `thinking_budget` should also be forwarded to model.generate() when supported.
     thinking_budget = gen_kwargs.pop("thinking_budget", None)
     enable_thinking = thinking_budget is not None and thinking_budget > 0
+    show_thinking = bool(gen_kwargs.pop("show_thinking", False))
 
-    messages = [
+    def _strip_markdown_fences(text: str) -> str:
+        text = re.sub(r"```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = text.replace("```", "")
+        return text.strip()
+
+    messages = []
+    if enable_thinking:
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "Use a short reasoning trace when thinking is enabled: "
+                    "at most 2 short sentences or about 40 words. "
+                    "Then give the final answer directly. "
+                    "Do not use markdown code fences."
+                ),
+            }
+        )
+    messages.append(
         {
             "role": "user",
             "content": [
@@ -286,7 +315,7 @@ def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
                 {"type": "image", "image": image},
             ],
         }
-    ]
+    )
 
     input_text = processor.apply_chat_template(
         messages,
@@ -294,6 +323,11 @@ def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
         tokenize=False,
         enable_thinking=enable_thinking,
     )
+
+    # Some processor/chat-template combos ignore `enable_thinking`.
+    # Ensure a thinking prefill exists when explicitly requested.
+    if enable_thinking and "<think>" not in input_text:
+        input_text = input_text + "<think>\n"
 
     inputs = processor(
         text=[input_text],
@@ -319,20 +353,78 @@ def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
         if isinstance(getattr(gc, "pad_token_id", None), set):
             gc.pad_token_id = list(gc.pad_token_id)
 
+    model_gen_kwargs = dict(gen_kwargs)
+    if enable_thinking:
+        model_gen_kwargs["thinking_budget"] = int(thinking_budget)
+
     with torch.no_grad():
-        output_ids = model.generate(
-            **inputs,
-            streamer=streamer,
-            **gen_kwargs,
-        )
+        try:
+            output_ids = model.generate(
+                **inputs,
+                streamer=streamer,
+                **model_gen_kwargs,
+            )
+        except (TypeError, ValueError) as exc:
+            # Some model implementations reject unsupported kwargs as either
+            # TypeError (unexpected kwarg) or ValueError (unused model_kwargs).
+            err = str(exc)
+            unsupported_thinking_budget = (
+                "thinking_budget" in err
+                and (
+                    "unexpected keyword argument" in err
+                    or "not used by the model" in err
+                )
+            )
+            if unsupported_thinking_budget:
+                model_gen_kwargs.pop("thinking_budget", None)
+                output_ids = model.generate(
+                    **inputs,
+                    streamer=streamer,
+                    **model_gen_kwargs,
+                )
+            else:
+                raise
 
     input_length = inputs["input_ids"].shape[1]
     generated_ids = output_ids[:, input_length:]
-    response = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+    response = processor.batch_decode(
+        generated_ids,
+        skip_special_tokens=not show_thinking,
+    )[0]
+    response = re.sub(r"<\|[^|]+?\|>", "", response).strip()
+    response = _strip_markdown_fences(response)
 
-    # Strip <think>...</think> blocks so the user only sees the final answer
+    if show_thinking:
+        # The chat template prefills "<think>\n" in the prompt, so the decoded
+        # continuation may omit the opening tag. Reconstruct it for display.
+        if enable_thinking and "<think>" not in response and not response.lstrip().startswith("{"):
+            if "</think>" in response:
+                reasoning, answer = response.split("</think>", 1)
+                reasoning = reasoning.strip()
+                answer = answer.lstrip()
+                if reasoning:
+                    response = f"<think>\n{reasoning}\n</think>\n{answer}"
+                else:
+                    response = answer
+            else:
+                json_start = response.find("{")
+                if json_start > 0:
+                    reasoning = response[:json_start].strip()
+                    answer = response[json_start:].lstrip()
+                    if reasoning:
+                        response = f"<think>\n{reasoning}\n</think>\n{answer}"
+                    else:
+                        response = answer
+        return response.strip()
+
+    # Hide reasoning by default. When the opening <think> tag was part of the
+    # prompt prefill, generated text may begin with reasoning and only emit the
+    # closing tag, so strip that implied reasoning span as well.
+    if enable_thinking and "</think>" in response and "<think>" not in response:
+        response = response.split("</think>", 1)[1]
     response = re.sub(r"<think>.*?</think>\s*", "", response, flags=re.DOTALL)
-    return response.strip()
+    response = response.replace("<think>", "").replace("</think>", "")
+    return _strip_markdown_fences(response)
 
 
 # ============================================================
@@ -426,7 +518,8 @@ def generate_response(
     temperature: float = 1.5,
     min_p: float = 0.1,
     stream: bool = False,
-    thinking_budget: Optional[int] = 512,
+    thinking_budget: Optional[int] = 64,
+    show_thinking: bool = False,
     repetition_penalty: float = 1.2,
 ) -> str:
     """Generate a response for an image and text prompt.
@@ -440,7 +533,8 @@ def generate_response(
         max_new_tokens, temperature, min_p: Generation parameters.
         stream: If True, streams output to stdout.
         thinking_budget: Max tokens for Qwen3.5 thinking (hf backend only).
-            Set to 0 or None to disable thinking entirely. Default: 512.
+            Set to 0 or None to disable thinking entirely. Default: 64.
+        show_thinking: If True, keep <think>...</think> text in output (hf only).
         repetition_penalty: Penalizes repeated tokens (>1.0 = less repetition).
             Default: 1.2.
 
@@ -459,4 +553,5 @@ def generate_response(
         return _generate_unsloth(model, tokenizer, image, prompt, **gen_kwargs)
     else:
         gen_kwargs["thinking_budget"] = thinking_budget
+        gen_kwargs["show_thinking"] = show_thinking
         return _generate_hf(model, tokenizer, image, prompt, **gen_kwargs)

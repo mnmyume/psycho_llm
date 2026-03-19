@@ -43,6 +43,11 @@ class VisionDataCollator:
         clean_messages = []
         for msg in messages:
             content = msg.get("content")
+            clean_msg = {
+                key: value
+                for key, value in msg.items()
+                if key != "content" and value is not None
+            }
             if isinstance(content, list):
                 clean_parts = []
                 for part in content:
@@ -63,9 +68,11 @@ class VisionDataCollator:
                         clean_parts.append({"type": "image"})
                     else:
                         clean_parts.append(clean_part)
-                clean_messages.append({"role": msg["role"], "content": clean_parts})
+                clean_msg["content"] = clean_parts
+                clean_messages.append(clean_msg)
             else:
-                clean_messages.append({"role": msg["role"], "content": content})
+                clean_msg["content"] = content
+                clean_messages.append(clean_msg)
         return clean_messages, images
 
     def _process_single(self, example):

@@ -49,21 +49,30 @@ Output strictly raw JSON. Do not use markdown blocks. Use the reasoning key to b
 }"""
 
 GRID_TEST_PROMPT="""
-You are given an isometric 8x8 grid image with exactly one selected cell.
-Return the location of that selected cell as grid indices, not pixel coordinates.
+You are given an 8×8 rhombus-shaped grid (isometric view), where each cell is a diamond (rhombus). Exactly one cell is colored blue.
 
-Coordinate rules:
-- The topmost cell is [0, 0].
-- Moving along the right edge direction increases x by 1.
-- Moving along the left edge direction increases y by 1.
-- Both x and y must be integers in the range 0 to 7.
-- Do not output image-space coordinates such as pixel positions.
+Return the location of the blue cell as grid indices [x, y], not pixel coordinates.
 
-Output Format:
-Output strictly raw JSON. Do not use markdown blocks. 
+Coordinate system definition:
+
+The topmost cell is [0, 0].
+
+All coordinates satisfy: 0 ≤ x ≤ 7 and 0 ≤ y ≤ 7.
+
+Strict instructions:
+
+You must count from [0,0] explicitly.
+Trace the diagonal (right-edge direction) and count x step-by-step.
+Trace the diagonal (left-edge direction) and count y step-by-step.
+Do not estimate visually.
+Reason briefly and keep the counting short before answering.
+
+Output format:
+Return strictly raw JSON (no markdown, no explanation):
 {
 "coordinates": [x, y]
-}"""
+}
+"""
 
 # A dictionary to easily look up prompts by name
 PROMPTS = {

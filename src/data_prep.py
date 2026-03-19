@@ -133,7 +133,21 @@ def detect_annotation_schema(fieldnames: list[str] | None) -> str | None:
     return None
 
 
-def build_sample(image_abs_path: str, response_payload: dict, prompt_string: str) -> dict:
+def build_coordinate_reasoning(coordinates: list[int]) -> str:
+    """Generate a short reasoning trace for grid-coordinate supervision."""
+    x, y = coordinates
+    return (
+        f"Count from [0, 0] along the right-edge diagonal until x = {x}, "
+        f"then count along the left-edge diagonal until y = {y}."
+    )
+
+
+def build_sample(
+    image_abs_path: str,
+    response_payload: dict,
+    prompt_string: str,
+    reasoning_content: str | None = None,
+) -> dict:
     """Build a single JSONL sample in the Qwen3-VL multimodal chat format.
 
     The format mirrors the existing EmoArt data loader:
@@ -147,6 +161,13 @@ def build_sample(image_abs_path: str, response_payload: dict, prompt_string: str
         ensure_ascii=False,
     )
 
+    assistant_message = {
+        "role": "assistant",
+        "content": [{"type": "text", "text": response_json}],
+    }
+    if reasoning_content:
+        assistant_message["reasoning_content"] = reasoning_content
+
     return {
         "messages": [
             {
@@ -156,10 +177,7 @@ def build_sample(image_abs_path: str, response_payload: dict, prompt_string: str
                     {"type": "image", "image": image_abs_path},
                 ],
             },
-            {
-                "role": "assistant",
-                "content": [{"type": "text", "text": response_json}],
-            },
+            assistant_message,
         ],
     }
 
@@ -269,12 +287,16 @@ def main():
                     continue
 
                 response_payload = {"coordinates": coordinates}
+                reasoning = row.get(reasoning_col, "").strip() if reasoning_col else ""
+                if not reasoning:
+                    reasoning = build_coordinate_reasoning(coordinates)
 
             # Build and write sample
             sample = build_sample(
                 image_abs_path=image_path,
                 response_payload=response_payload,
                 prompt_string=prompt_string,
+                reasoning_content=reasoning if schema == "coordinates" else None,
             )
             out_file.write(json.dumps(sample, ensure_ascii=False) + "\n")
             written += 1
