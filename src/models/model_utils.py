@@ -15,6 +15,7 @@ import os
 import torch
 from PIL import Image as PILImage
 from typing import Optional, Tuple
+import transformers
 
 from transformers import TextStreamer
 
@@ -88,8 +89,8 @@ def _generate_unsloth(model, tokenizer, image, prompt, **gen_kwargs) -> str:
         {
             "role": "user",
             "content": [
-                {"type": "image", "image": image},
                 {"type": "text", "text": prompt},
+                {"type": "image", "image": image},
             ],
         }
     ]
@@ -132,16 +133,37 @@ def _load_hf(model_name: str, load_in_4bit: bool = False) -> Tuple:
     models (expert layers use custom classes that BnB can't quantize).
     We always load in bf16 regardless of load_in_4bit.
     """
-    from transformers import AutoModelForImageTextToText, AutoProcessor
+    from transformers import AutoProcessor
+    try:
+        from transformers import AutoModelForImageTextToText as AutoHFVisionModel
+    except ImportError:
+        from transformers import AutoModelForVision2Seq as AutoHFVisionModel
 
     print(f"Loading base model [hf]: {model_name} (bf16)")
-    model = AutoModelForImageTextToText.from_pretrained(
-        model_name,
-        torch_dtype=torch.bfloat16,
-        device_map="auto",
-    )
+    try:
+        model = AutoHFVisionModel.from_pretrained(
+            model_name,
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
+            trust_remote_code=True,
+        )
+    except Exception as exc:
+        if isinstance(exc, KeyError) and "qwen3_5" in str(exc):
+            raise RuntimeError(
+                "Current transformers build does not support Qwen3.5 model_type 'qwen3_5'. "
+                f"Installed transformers={transformers.__version__}. "
+                "Upgrade transformers in the training environment or use an Unsloth Qwen3-VL recipe."
+            ) from exc
+        from transformers import AutoModelForCausalLM
+        print(f"Vision model auto-loader failed ({type(exc).__name__}); falling back to AutoModelForCausalLM.")
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
+            trust_remote_code=True,
+        )
 
-    processor = AutoProcessor.from_pretrained(model_name)
+    processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
 
     if hasattr(model, "gradient_checkpointing_enable"):
         model.gradient_checkpointing_enable()
@@ -162,23 +184,51 @@ def _apply_lora_hf(
     """Apply LoRA via standard PEFT library."""
     from peft import LoraConfig, get_peft_model
 
-    target_modules = []
+    if not finetune_vision_layers and not finetune_language_layers:
+        raise ValueError(
+            "At least one of finetune_vision_layers or finetune_language_layers must be True."
+        )
+
+    module_suffixes = []
     if finetune_attention_modules:
-        target_modules.extend(["q_proj", "k_proj", "v_proj", "o_proj"])
+        module_suffixes.extend(["q_proj", "k_proj", "v_proj", "o_proj"])
     if finetune_mlp_modules:
-        target_modules.extend(["gate_proj", "up_proj", "down_proj"])
+        module_suffixes.extend(["gate_proj", "up_proj", "down_proj"])
 
+    if not module_suffixes:
+        raise ValueError(
+            "At least one of finetune_attention_modules or finetune_mlp_modules must be True."
+        )
+
+    def _is_vision_module(name: str) -> bool:
+        return any(tok in name for tok in ("visual", "vision_tower", "vision_model"))
+
+    def _is_language_module(name: str) -> bool:
+        return any(tok in name for tok in ("model.layers", "language_model", "lm_head"))
+
+    target_modules = []
+    for module_name, _ in model.named_modules():
+        if not any(module_name.endswith(f".{suffix}") for suffix in module_suffixes):
+            continue
+
+        is_vision = _is_vision_module(module_name)
+        is_language = _is_language_module(module_name)
+
+        if finetune_vision_layers and finetune_language_layers:
+            target_modules.append(module_name)
+        elif finetune_vision_layers and is_vision:
+            target_modules.append(module_name)
+        elif finetune_language_layers and is_language:
+            target_modules.append(module_name)
+
+    target_modules = sorted(set(target_modules))
     if not target_modules:
-        raise ValueError("At least one of finetune_attention_modules or finetune_mlp_modules must be True.")
-
-    # Scope target modules to vision/language layers
-    if finetune_language_layers and not finetune_vision_layers:
-        target_modules = [f"model.layers.*.{m}" for m in target_modules]
-    elif finetune_vision_layers and not finetune_language_layers:
-        target_modules = [f"visual.*.{m}" for m in target_modules]
+        raise ValueError(
+            "No LoRA target modules matched. Check finetune_* flags and model architecture names."
+        )
 
     print(f"Applying LoRA adapters [hf] (r={r}, alpha={alpha}, dropout={dropout})")
-    print(f"  Target modules: {target_modules}")
+    print(f"  Matched {len(target_modules)} target modules.")
 
     lora_config = LoraConfig(
         r=r,
@@ -198,7 +248,6 @@ def _apply_lora_hf(
 def _load_hf_inference(model_path: str, load_in_4bit: bool = False) -> Tuple:
     """Load model for inference via HuggingFace + PEFT."""
     from peft import PeftModel
-    from transformers import AutoModelForImageTextToText, AutoProcessor
 
     print(f"Loading model for inference [hf]: {model_path}")
 
@@ -233,8 +282,8 @@ def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
         {
             "role": "user",
             "content": [
-                {"type": "image", "image": image},
                 {"type": "text", "text": prompt},
+                {"type": "image", "image": image},
             ],
         }
     ]

@@ -1,4 +1,4 @@
-from datasets import load_dataset, Image
+import json
 
 
 class Dataset(object):
@@ -31,3 +31,14 @@ class Dataset(object):
     @staticmethod
     def get_prompt(item):
         raise NotImplementedError
+
+
+def read_jsonl(path: str):
+    rows = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            rows.append(json.loads(line))
+    return rows

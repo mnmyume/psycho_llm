@@ -1,11 +1,11 @@
 # ============================================================
-# Qwen3-VL-32B LoRA Fine-Tuning Recipe
+# Grid-001 LoRA Fine-Tuning Recipe (Qwen3-VL-32B, Unsloth)
 # ============================================================
-# Recipe for the larger 32B model on the full EmoArt-130k dataset.
-# Requires more VRAM and training time.
+# Fine-tune Qwen3-VL-32B on the grid-001 isometric image
+# cell-selection dataset (image -> coordinates).
 #
 # Usage:
-#   python src/train.py --config recipes/Qwen3-VL-32B.yaml
+#   python src/train.py --config recipes/grid-001-qwen3vl32b.yaml --run_name grid_001_qwen3vl32b_v1
 # ============================================================
 
 # --- Model ---
@@ -14,11 +14,11 @@ backend: unsloth
 load_in_4bit: true
 
 # --- Dataset ---
-dataset_path: dataset/EmoArt-130k/Annotation.json
-dataset_dir: dataset/EmoArt-130k
+dataset_path: dataset/grid-001/train_dataset.jsonl
+dataset_dir: dataset/grid-001
 
 # --- Run ---
-run_name: qwen3_vl_32B_emoart_130k
+run_name: grid_001_qwen3vl32b
 
 # --- LoRA ---
 lora_r: 16
@@ -30,17 +30,17 @@ finetune_attention_modules: true
 finetune_mlp_modules: true
 
 # --- Training ---
-batch_size: 2
-gradient_accumulation_steps: 4
-learning_rate: 2.0e-4
-num_epochs: 1
-warmup_steps: 5
-max_length: 2048
+batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 5.0e-5
+num_epochs: 20
+warmup_steps: 10
+max_length: 512
 lr_scheduler_type: linear
-weight_decay: 0.001
+weight_decay: 0.01
 seed: 3407
 
 # --- Inference ---
 inference_max_tokens: 4096
-inference_temperature: 1.5
+inference_temperature: 0.1
 inference_min_p: 0.1

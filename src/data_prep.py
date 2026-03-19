@@ -67,8 +67,14 @@ def parse_args():
     return parser.parse_args()
 
 
-def validate_score(value: str, column_name: str, row_num: int) -> int | None:
-    """Validate that a score string is an integer in [1, 5].
+def validate_score(
+    value: str,
+    column_name: str,
+    row_num: int,
+    min_score: int,
+    max_score: int,
+) -> int | None:
+    """Validate that a score string is an integer in [min_score, max_score].
 
     Returns the integer on success, or None (with a warning) on failure.
     """
@@ -78,8 +84,11 @@ def validate_score(value: str, column_name: str, row_num: int) -> int | None:
         print(f"  ⚠  Row {row_num}: '{column_name}' is not an integer: {value!r}")
         return None
 
-    if not 1 <= score <= 5:
-        print(f"  ⚠  Row {row_num}: '{column_name}' out of range [1-5]: {score}")
+    if not min_score <= score <= max_score:
+        print(
+            f"  ⚠  Row {row_num}: '{column_name}' out of range "
+            f"[{min_score}-{max_score}]: {score}"
+        )
         return None
 
     return score
@@ -155,6 +164,12 @@ def build_sample(image_abs_path: str, response_payload: dict, prompt_string: str
     }
 
 
+def score_range_for_prompt(prompt_name: str) -> tuple[int, int]:
+    if prompt_name == "expert_reasoning":
+        return 1, 3
+    return 1, 5
+
+
 def main():
     args = parse_args()
 
@@ -162,6 +177,7 @@ def main():
     image_dir = os.path.abspath(args.image_dir)
     output_path = args.output
     prompt_string = PROMPTS[args.prompt_name]
+    min_score, max_score = score_range_for_prompt(args.prompt_name)
 
     # ── Validate inputs ────────────────────────────────────────────────
     if not os.path.isfile(csv_path):
@@ -199,6 +215,8 @@ def main():
             sys.exit(1)
 
         print(f"  Schema:    {schema}")
+        if schema == "scores":
+            print(f"  Score range: [{min_score}-{max_score}]")
 
         # Support both "reasoning" and "explanation" as optional columns
         reasoning_col = None
@@ -218,9 +236,19 @@ def main():
                 continue
 
             if schema == "scores":
-                chaos_tidy = validate_score(row["chaos_tidy_score"], "chaos_tidy_score", row_num)
+                chaos_tidy = validate_score(
+                    row["chaos_tidy_score"],
+                    "chaos_tidy_score",
+                    row_num,
+                    min_score,
+                    max_score,
+                )
                 monotony_variety = validate_score(
-                    row["monotony_variety_score"], "monotony_variety_score", row_num,
+                    row["monotony_variety_score"],
+                    "monotony_variety_score",
+                    row_num,
+                    min_score,
+                    max_score,
                 )
 
                 if chaos_tidy is None or monotony_variety is None:

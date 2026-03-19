@@ -54,9 +54,8 @@ PROMPTS = {
 # ----- Available Models -----
 # Each entry maps a display name to (model_path, backend)
 MODELS = {
-    "LoRA (Grid-001-Qwen3.5-9B)": ("lora_model/grid_001_qwen3.5-9b_v3", "hf"),
-    "LoRA (Sandbox-001-Qwen3.5-9B)": ("lora_model/sandbox_001_qwen3.5-9b_v5", "hf"),
-    "LoRA (Sandbox-001-Qwen3-VL-32B)": ("lora_model/sandbox_001_qwen3vl32b_v1", "unsloth"),
+    "LoRA (Grid-001-Qwen3.5-9B)": ("lora_model/grid_001_qwen3.5-9b_v1", "hf"),
+    "LoRA (Grid-001-Qwen3-VL-32B)": ("lora_model/grid_001_qwen3vl32b_v1", "unsloth"),
     "Base Model (Qwen3.5-35B-A3B)": ("Qwen/Qwen3.5-35B-A3B", "hf"),
     "Base Model (Qwen3-VL-32B)": ("unsloth/Qwen3-VL-32B-Instruct-unsloth-bnb-4bit", "unsloth"),
     "Base Model (Qwen3-VL-8B)": ("unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit", "unsloth"),
@@ -185,7 +184,7 @@ def create_app(initial_model_path, load_in_4bit):
 
                 with gr.Accordion("Generation Settings", open=False):
                     temperature = gr.Slider(
-                        minimum=0.1, maximum=2.0, value=0.7, step=0.1,
+                        minimum=0.1, maximum=2.0, value=0.1, step=0.1,
                         label="Temperature",
                         info="Higher = more creative, Lower = more focused",
                     )

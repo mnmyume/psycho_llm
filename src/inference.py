@@ -26,6 +26,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -79,14 +80,35 @@ def parse_args():
         help="Disable 4-bit quantization (use 16-bit instead).",
     )
     parser.add_argument(
-        "--backend", type=str, default="hf", choices=["unsloth", "hf"],
-        help="Model backend: 'unsloth' for Qwen3-VL, 'hf' for Qwen3.5.",
+        "--backend", type=str, default="auto", choices=["auto", "unsloth", "hf"],
+        help="Backend: auto-detect (recommended), or force 'unsloth' / 'hf'.",
     )
     parser.add_argument(
         "--stream", action="store_true",
         help="Stream output tokens to stdout as they are generated.",
     )
     return parser.parse_args()
+
+
+def _infer_backend(model_path: str, backend: str) -> str:
+    if backend in ("unsloth", "hf"):
+        return backend
+
+    adapter_cfg = os.path.join(model_path, "adapter_config.json")
+    if os.path.isfile(adapter_cfg):
+        try:
+            with open(adapter_cfg, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            base = str(cfg.get("base_model_name_or_path", "")).lower()
+            if "qwen3-vl" in base or "unsloth/" in base:
+                return "unsloth"
+        except Exception:
+            pass
+
+    model_path_l = model_path.lower()
+    if "qwen3-vl" in model_path_l or "unsloth/" in model_path_l:
+        return "unsloth"
+    return "hf"
 
 
 def run_inference(args):
@@ -100,10 +122,12 @@ def run_inference(args):
     print(f"Loading image: {args.image}")
     image = Image.open(args.image).convert("RGB")
 
+    resolved_backend = _infer_backend(args.model_path, args.backend)
+
     # Load the model (automatically detects if it's a LoRA adapter or base model)
     model, tokenizer = load_model_for_inference(
         model_path=args.model_path,
-        backend=args.backend,
+        backend=resolved_backend,
         load_in_4bit=not args.no_4bit,
     )
 
@@ -116,7 +140,7 @@ def run_inference(args):
         tokenizer=tokenizer,
         image=image,
         prompt=args.prompt,
-        backend=args.backend,
+        backend=resolved_backend,
         max_new_tokens=args.max_tokens,
         temperature=args.temperature,
         min_p=args.min_p,

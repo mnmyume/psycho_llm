@@ -51,4 +51,4 @@ echo "Date: $(date)"
 # --- Grid-001 (Qwen3.5-9B) ---
 srun python src/train.py \
     --config recipes/grid-001-qwen3.5-9b.yaml \
-    --run_name "grid_001_qwen3.5-9b_v3"
+    --run_name "grid_001_qwen3.5-9b_v1"

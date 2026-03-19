@@ -103,6 +103,18 @@ def train(config: TrainingConfig):
             annotation_path=config.dataset_path,
             data_dir=config.dataset_dir,
         )
+
+    # Unsloth's SFTTrainer path can misclassify VLM models when a top-level
+    # 'image'/'images' column exists. Keep only chat messages for this backend.
+    if config.backend == "unsloth":
+        cols_to_remove = [
+            col for col in ("image", "images")
+            if col in dataset.data.column_names
+        ]
+        if cols_to_remove:
+            print(f"  Removing columns for unsloth compatibility: {cols_to_remove}")
+            dataset.data = dataset.data.remove_columns(cols_to_remove)
+
     print(f"  Loaded {len(dataset)} training samples.")
 
     # --- Step 2: Load Base Model ---
