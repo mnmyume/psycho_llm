@@ -1,19 +1,25 @@
 """
-Dataset preparation script for image fine-tuning datasets.
+Dataset preparation script for multimodal fine-tuning datasets.
 
-Reads a CSV of image filenames + annotations and produces a JSONL file in the
-Qwen3-VL multimodal chat format expected by SFTTrainer.
+Supports two annotation sources and writes a JSONL file in the multimodal chat
+format expected by SFTTrainer.
 
 Usage:
-    # Using defaults (dataset/sandbox-001/):
+    # CSV annotations (existing sandbox/grid-001 flow):
     python src/data_prep.py
 
-    # Custom paths:
     python src/data_prep.py \
-        --csv_path   dataset/grid-001/annotations.csv \
-        --image_dir  dataset/grid-001/images \
-        --output     dataset/grid-001/train_dataset.jsonl \
+        --source_type csv \
+        --csv_path dataset/grid-001/annotations.csv \
+        --image_dir dataset/grid-001/images \
+        --output dataset/grid-001/train_dataset.jsonl \
         --prompt_name grid_test
+
+    # Sidecar JSON annotations stored next to images (grid-002 flow):
+    python src/data_prep.py \
+        --source_type sidecar_json \
+        --dataset_dir dataset/grid-002 \
+        --output dataset/grid-002/train_dataset.jsonl
 
 Supported CSV schemas:
     image_filename,chaos_tidy_score,monotony_variety_score[,reasoning|explanation]
@@ -21,6 +27,14 @@ Supported CSV schemas:
 
     image_filename,coordinates
     my_image.png,"(2, 4)"
+
+Supported sidecar JSON schema:
+    {
+      "system_prompt": "...",
+      "user_prompt": "...",
+      "index": [0, 0],
+      "boundary": [278, 221, ...]
+    }
 """
 
 import argparse
@@ -28,16 +42,28 @@ import csv
 import json
 import os
 import sys
+from pathlib import Path
 
 from prompts import PROMPTS
 
 
-# Removed inline PROMPT string mappings since they are now extracted to src/prompts.py
+SIDECAR_PROMPT_KEYS = {"system_prompt", "user_prompt"}
+
 
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Generate a Qwen3-VL fine-tuning JSONL from sandbox images + CSV scores.",
+        description="Generate a multimodal fine-tuning JSONL from CSV or sidecar JSON annotations.",
+    )
+    parser.add_argument(
+        "--source_type",
+        type=str,
+        default="auto",
+        choices=["auto", "csv", "sidecar_json"],
+        help=(
+            "Annotation source type. 'auto' uses sidecar_json when --dataset_dir is set, "
+            "otherwise falls back to csv."
+        ),
     )
     parser.add_argument(
         "--csv_path",
@@ -52,6 +78,24 @@ def parse_args():
         help="Directory containing the raw sandbox images.",
     )
     parser.add_argument(
+        "--dataset_dir",
+        type=str,
+        default=None,
+        help="Directory containing image files and sidecar JSON annotations.",
+    )
+    parser.add_argument(
+        "--annotation_ext",
+        type=str,
+        default=".json",
+        help="Sidecar annotation file extension for sidecar_json mode.",
+    )
+    parser.add_argument(
+        "--image_ext",
+        type=str,
+        default=".png",
+        help="Image file extension for sidecar_json mode.",
+    )
+    parser.add_argument(
         "--output",
         type=str,
         default="dataset/sandbox-001/train_dataset.jsonl",
@@ -63,6 +107,15 @@ def parse_args():
         default="expert_reasoning",
         choices=list(PROMPTS.keys()),
         help="Name of the prompt template to use from src/prompts.py.",
+    )
+    parser.add_argument(
+        "--sidecar_exclude_keys",
+        nargs="*",
+        default=["boundary"],
+        help=(
+            "Keys to omit from the assistant response payload when reading sidecar JSON files. "
+            "Defaults to excluding 'boundary' because it is already present in the user prompt."
+        ),
     )
     return parser.parse_args()
 
@@ -145,13 +198,15 @@ def build_coordinate_reasoning(coordinates: list[int]) -> str:
 def build_sample(
     image_abs_path: str,
     response_payload: dict,
-    prompt_string: str,
+    user_prompt: str,
+    system_prompt: str | None = None,
     reasoning_content: str | None = None,
 ) -> dict:
     """Build a single JSONL sample in the Qwen3-VL multimodal chat format.
 
     The format mirrors the existing EmoArt data loader:
       messages = [
+          {role: system,    content: [{type: text, ...}]},
           {role: user,      content: [{type: text, ...}, {type: image, ...}]},
           {role: assistant,  content: [{type: text, ...}]},
       ]
@@ -168,18 +223,27 @@ def build_sample(
     if reasoning_content:
         assistant_message["reasoning_content"] = reasoning_content
 
-    return {
-        "messages": [
+    messages = []
+    if system_prompt:
+        messages.append(
             {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt_string},
-                    {"type": "image", "image": image_abs_path},
-                ],
-            },
-            assistant_message,
-        ],
-    }
+                "role": "system",
+                "content": [{"type": "text", "text": system_prompt}],
+            }
+        )
+
+    messages.append(
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user_prompt},
+                {"type": "image", "image": image_abs_path},
+            ],
+        }
+    )
+    messages.append(assistant_message)
+
+    return {"messages": messages}
 
 
 def score_range_for_prompt(prompt_name: str) -> tuple[int, int]:
@@ -188,16 +252,64 @@ def score_range_for_prompt(prompt_name: str) -> tuple[int, int]:
     return 1, 5
 
 
-def main():
-    args = parse_args()
+def resolve_source_type(args) -> str:
+    """Resolve which annotation source should be used."""
+    if args.source_type != "auto":
+        return args.source_type
+    if args.dataset_dir:
+        return "sidecar_json"
+    return "csv"
 
+
+def resolve_reasoning_column(fieldnames: list[str] | None) -> str | None:
+    """Support both reasoning column names used in older CSV datasets."""
+    if not fieldnames:
+        return None
+    if "reasoning" in fieldnames:
+        return "reasoning"
+    if "explanation" in fieldnames:
+        return "explanation"
+    return None
+
+
+def normalize_extension(ext: str) -> str:
+    """Ensure file extensions consistently begin with a dot."""
+    return ext if ext.startswith(".") else f".{ext}"
+
+
+def extract_sidecar_response_payload(
+    annotation_data: dict,
+    exclude_keys: set[str],
+) -> dict:
+    """Extract assistant response fields from a sidecar annotation file."""
+    return {
+        key: value
+        for key, value in annotation_data.items()
+        if key not in SIDECAR_PROMPT_KEYS and key not in exclude_keys
+    }
+
+
+def validate_index_payload(value, sample_name: str) -> bool:
+    """Validate the common grid-index payload used by the sidecar dataset."""
+    if value is None:
+        return True
+    if not isinstance(value, list) or len(value) != 2 or not all(isinstance(v, int) for v in value):
+        print(
+            f"  ⚠  Sample {sample_name}: 'index' must be a list of two integers, "
+            f"got {value!r}"
+        )
+        return False
+    return True
+
+
+def prepare_csv_dataset(args) -> tuple[int, int]:
+    """Build JSONL samples from a CSV annotation file."""
     csv_path = args.csv_path
     image_dir = os.path.abspath(args.image_dir)
     output_path = args.output
     prompt_string = PROMPTS[args.prompt_name]
     min_score, max_score = score_range_for_prompt(args.prompt_name)
 
-    # ── Validate inputs ────────────────────────────────────────────────
     if not os.path.isfile(csv_path):
         print(f"ERROR: CSV file not found: {csv_path}")
         sys.exit(1)
@@ -207,12 +319,12 @@ def main():
 
     print("=" * 60)
     print("  Psycho LLM — Dataset Preparation")
+    print("  Source:    csv")
     print(f"  CSV:       {csv_path}")
     print(f"  Images:    {image_dir}")
     print(f"  Output:    {output_path}")
     print("=" * 60)
 
-    # ── Read CSV and build JSONL ───────────────────────────────────────
     written = 0
     skipped = 0
 
@@ -236,12 +348,7 @@ def main():
         if schema == "scores":
             print(f"  Score range: [{min_score}-{max_score}]")
 
-        # Support both "reasoning" and "explanation" as optional columns
-        reasoning_col = None
-        if "reasoning" in reader.fieldnames:
-            reasoning_col = "reasoning"
-        elif "explanation" in reader.fieldnames:
-            reasoning_col = "explanation"
+        reasoning_col = resolve_reasoning_column(reader.fieldnames)
 
         for row_num, row in enumerate(reader, start=2):  # row 1 = header
             filename = row["image_filename"].strip()
@@ -293,19 +400,123 @@ def main():
 
             # Build and write sample
             sample = build_sample(
-                image_abs_path=image_path,
+                image_abs_path=os.path.abspath(image_path),
                 response_payload=response_payload,
-                prompt_string=prompt_string,
+                user_prompt=prompt_string,
                 reasoning_content=reasoning if schema == "coordinates" else None,
             )
             out_file.write(json.dumps(sample, ensure_ascii=False) + "\n")
             written += 1
 
-    # ── Summary ────────────────────────────────────────────────────────
+    return written, skipped
+
+
+def prepare_sidecar_json_dataset(args) -> tuple[int, int]:
+    """Build JSONL samples from per-image sidecar JSON annotations."""
+    dataset_dir = Path(args.dataset_dir or args.image_dir).resolve()
+    output_path = args.output
+    annotation_ext = normalize_extension(args.annotation_ext)
+    image_ext = normalize_extension(args.image_ext)
+    exclude_keys = set(args.sidecar_exclude_keys or [])
+
+    if not dataset_dir.is_dir():
+        print(f"ERROR: Dataset directory not found: {dataset_dir}")
+        sys.exit(1)
+
+    annotation_paths = sorted(dataset_dir.glob(f"*{annotation_ext}"))
+    if not annotation_paths:
+        print(
+            f"ERROR: No sidecar annotation files with extension {annotation_ext!r} "
+            f"found in {dataset_dir}"
+        )
+        sys.exit(1)
+
+    print("=" * 60)
+    print("  Psycho LLM — Dataset Preparation")
+    print("  Source:    sidecar_json")
+    print(f"  Dataset:   {dataset_dir}")
+    print(f"  Output:    {output_path}")
+    print(f"  Sidecars:  {len(annotation_paths)} files")
+    print("=" * 60)
+
+    written = 0
+    skipped = 0
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    with open(output_path, "w", encoding="utf-8") as out_file:
+        for annotation_path in annotation_paths:
+            sample_name = annotation_path.stem
+            image_path = annotation_path.with_suffix(image_ext)
+
+            if not image_path.is_file():
+                print(f"  ⚠  Sample {sample_name}: image not found: {image_path}")
+                skipped += 1
+                continue
+
+            try:
+                with open(annotation_path, "r", encoding="utf-8") as annotation_file:
+                    annotation_data = json.load(annotation_file)
+            except json.JSONDecodeError as exc:
+                print(f"  ⚠  Sample {sample_name}: invalid JSON ({exc})")
+                skipped += 1
+                continue
+
+            if not isinstance(annotation_data, dict):
+                print(f"  ⚠  Sample {sample_name}: sidecar JSON must be an object")
+                skipped += 1
+                continue
+
+            system_prompt = annotation_data.get("system_prompt")
+            user_prompt = annotation_data.get("user_prompt")
+            response_payload = extract_sidecar_response_payload(annotation_data, exclude_keys)
+
+            if not isinstance(system_prompt, str) or not system_prompt.strip():
+                print(f"  ⚠  Sample {sample_name}: missing or empty 'system_prompt'")
+                skipped += 1
+                continue
+            if not isinstance(user_prompt, str) or not user_prompt.strip():
+                print(f"  ⚠  Sample {sample_name}: missing or empty 'user_prompt'")
+                skipped += 1
+                continue
+            if not response_payload:
+                print(f"  ⚠  Sample {sample_name}: no assistant response fields found")
+                skipped += 1
+                continue
+            if not validate_index_payload(response_payload.get("index"), sample_name):
+                skipped += 1
+                continue
+
+            sample = build_sample(
+                image_abs_path=str(image_path.resolve()),
+                response_payload=response_payload,
+                user_prompt=user_prompt.strip(),
+                system_prompt=system_prompt.strip(),
+            )
+            out_file.write(json.dumps(sample, ensure_ascii=False) + "\n")
+            written += 1
+
+    return written, skipped
+
+
+def print_summary(output_path: str, written: int, skipped: int):
+    """Print a shared success summary after dataset generation."""
     total = written + skipped
     print(f"\nDone! {written}/{total} samples written to {output_path}")
     if skipped:
-        print(f"  ({skipped} rows skipped due to missing images or invalid scores)")
+        print("  Skipped samples due to missing files or invalid annotations.")
+
+
+def main():
+    args = parse_args()
+    source_type = resolve_source_type(args)
+
+    if source_type == "csv":
+        written, skipped = prepare_csv_dataset(args)
+    else:
+        written, skipped = prepare_sidecar_json_dataset(args)
+
+    print_summary(args.output, written, skipped)
 
 
 if __name__ == "__main__":

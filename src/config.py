@@ -23,7 +23,8 @@ class TrainingConfig:
         run_name: Unique identifier for this training run, used for checkpoint and LoRA save dirs.
         output_dir: Directory where training checkpoints are saved during training.
         lora_save_dir: Directory where the final LoRA adapter weights are saved after training.
-        load_in_4bit: Whether to load the base model in 4-bit quantization (saves VRAM).
+        load_in_4bit: Whether to load the base model in 4-bit quantization.
+                      For HF, this enables a bitsandbytes QLoRA load when supported.
 
         # LoRA configuration
         lora_r: LoRA rank — controls the dimensionality of the low-rank matrices.
@@ -56,7 +57,7 @@ class TrainingConfig:
     # --- Model ---
     model_name: str = "Qwen/Qwen3.5-35B-A3B"
     backend: str = "hf"  # "unsloth" or "hf"
-    load_in_4bit: bool = True
+    load_in_4bit: bool = False
 
     # --- Dataset ---
     dataset_path: str = "dataset/EmoArt-130k/Annotation.json"

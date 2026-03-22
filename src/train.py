@@ -71,6 +71,13 @@ def parse_args():
     return parser.parse_args()
 
 
+def resolve_optimizer(config: TrainingConfig) -> str:
+    """Select an optimizer suited to the selected backend and precision mode."""
+    if config.backend == "hf" and config.load_in_4bit:
+        return "paged_adamw_32bit"
+    return "adamw_8bit"
+
+
 def train(config: TrainingConfig):
     """Run the full LoRA fine-tuning pipeline.
 
@@ -89,6 +96,7 @@ def train(config: TrainingConfig):
     print(f"  Run:      {config.run_name}")
     print(f"  Output:   {config.output_dir}")
     print(f"  LoRA dir: {config.lora_save_dir}")
+    print(f"  4-bit:    {config.load_in_4bit}")
     print("=" * 60)
 
     # --- Step 1: Load Dataset ---
@@ -158,6 +166,8 @@ def train(config: TrainingConfig):
         from data_loaders.vision_collator import VisionDataCollator
         trainer_kwargs["data_collator"] = VisionDataCollator(tokenizer, max_length=config.max_length)
     trainer_kwargs["processing_class"] = tokenizer
+    optimizer_name = resolve_optimizer(config)
+    print(f"  Optimizer: {optimizer_name}")
 
     trainer = SFTTrainer(
         model=model,
@@ -169,7 +179,7 @@ def train(config: TrainingConfig):
             num_train_epochs=config.num_epochs,
             learning_rate=config.learning_rate,
             logging_steps=1,
-            optim="adamw_8bit",
+            optim=optimizer_name,
             weight_decay=config.weight_decay,
             lr_scheduler_type=config.lr_scheduler_type,
             seed=config.seed,

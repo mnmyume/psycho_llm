@@ -48,7 +48,15 @@ echo "Date: $(date)"
 #     --config recipes/sandbox-001-qwen3.5-9b.yaml \
 #     --run_name "sandbox_001_qwen3.5-9b_v5"
 
-# --- Grid-001 (Qwen3.5-9B) ---
+# Default recipe for this script.
+# Override at submit time, for example:
+#   sbatch --export=ALL,CONFIG_PATH=recipes/grid-001-qwen3vl32b.yaml,RUN_NAME=grid_001_qwen3vl32b_v1 train.sh
+CONFIG_PATH="${CONFIG_PATH:-recipes/grid-002-qwen3vl32b.yaml}"
+RUN_NAME="${RUN_NAME:-grid_002_qwen3vl32b_v1}"
+
+echo "Config: $CONFIG_PATH"
+echo "Run name: $RUN_NAME"
+
 srun python src/train.py \
-    --config recipes/grid-001-qwen3.5-9b.yaml \
-    --run_name "grid_001_qwen3.5-9b_v4"
+    --config "$CONFIG_PATH" \
+    --run_name "$RUN_NAME"

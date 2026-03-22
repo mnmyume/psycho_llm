@@ -5,7 +5,8 @@ Supports two backends:
   - "unsloth": Uses FastVisionModel for optimized loading + 4-bit quantization.
                Best for Qwen3-VL models (dense architectures).
   - "hf":      Uses standard HuggingFace transformers + PEFT.
-               Required for Qwen3.5 MoE models (BnB can't quantize MoE experts).
+               Supports bf16 loading by default and can optionally use
+               bitsandbytes 4-bit QLoRA when the model architecture supports it.
 
 The backend is selected via the `backend` field in the training recipe YAML.
 """
@@ -126,26 +127,88 @@ def _generate_unsloth(model, tokenizer, image, prompt, **gen_kwargs) -> str:
 # Backend: HuggingFace (for Qwen3.5 MoE models)
 # ============================================================
 
-def _load_hf(model_name: str, load_in_4bit: bool = False) -> Tuple:
-    """Load model via standard HuggingFace transformers in bf16.
+def _hf_validate_4bit_target(model_name: str):
+    """Reject known HF model families that do not fit this repo's 4-bit path."""
+    model_name_l = model_name.lower()
+    if "fp8" in model_name_l:
+        raise RuntimeError(
+            f"HF 4-bit QLoRA cannot be combined with an FP8 checkpoint: {model_name}. "
+            "Use the non-FP8 base model instead."
+        )
+    if "a3b" in model_name_l:
+        raise RuntimeError(
+            f"HF 4-bit QLoRA is not supported in this repo for MoE A3B models: {model_name}. "
+            "Use bf16 on larger hardware or an Unsloth Qwen3-VL recipe instead."
+        )
 
-    Note: 4-bit quantization via BitsAndBytes is NOT effective for MoE
-    models (expert layers use custom classes that BnB can't quantize).
-    We always load in bf16 regardless of load_in_4bit.
-    """
+
+def _hf_quantization_config(model_name: str, load_in_4bit: bool):
+    """Build a bitsandbytes quantization config for HF QLoRA loads."""
+    if not load_in_4bit:
+        return None
+
+    _hf_validate_4bit_target(model_name)
+    if not torch.cuda.is_available():
+        raise RuntimeError("HF 4-bit loading requires a CUDA GPU.")
+
+    from transformers import BitsAndBytesConfig
+
+    return BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_use_double_quant=True,
+    )
+
+
+def _hf_training_load_kwargs(model_name: str, load_in_4bit: bool) -> dict:
+    """Build from_pretrained kwargs for HF training loads."""
+    kwargs = {
+        "dtype": torch.bfloat16,
+        "trust_remote_code": True,
+    }
+    quantization_config = _hf_quantization_config(model_name, load_in_4bit)
+    if quantization_config is not None:
+        kwargs["quantization_config"] = quantization_config
+        # For training, keep the model on the current device rather than
+        # relying on auto-sharding/offload behavior intended for inference.
+        kwargs["device_map"] = {"": torch.cuda.current_device()}
+    else:
+        kwargs["device_map"] = "auto"
+    return kwargs
+
+
+def _hf_inference_load_kwargs(model_name: str, load_in_4bit: bool) -> dict:
+    """Build from_pretrained kwargs for HF inference loads."""
+    kwargs = {
+        "dtype": torch.bfloat16,
+        "trust_remote_code": True,
+    }
+    quantization_config = _hf_quantization_config(model_name, load_in_4bit)
+    if quantization_config is not None:
+        kwargs["quantization_config"] = quantization_config
+    kwargs["device_map"] = "auto"
+    return kwargs
+
+
+def _load_hf(
+    model_name: str,
+    load_in_4bit: bool = False,
+) -> Tuple:
+    """Load model via HuggingFace transformers in bf16 or 4-bit QLoRA mode."""
     from transformers import AutoProcessor
     try:
         from transformers import AutoModelForImageTextToText as AutoHFVisionModel
     except ImportError:
         from transformers import AutoModelForVision2Seq as AutoHFVisionModel
 
-    print(f"Loading base model [hf]: {model_name} (bf16)")
+    mode_label = "4-bit NF4 QLoRA" if load_in_4bit else "bf16"
+    print(f"Loading base model [hf]: {model_name} ({mode_label})")
+    load_kwargs = _hf_training_load_kwargs(model_name, load_in_4bit)
     try:
         model = AutoHFVisionModel.from_pretrained(
             model_name,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-            trust_remote_code=True,
+            **load_kwargs,
         )
     except Exception as exc:
         if isinstance(exc, KeyError) and "qwen3_5" in str(exc):
@@ -158,13 +221,13 @@ def _load_hf(model_name: str, load_in_4bit: bool = False) -> Tuple:
         print(f"Vision model auto-loader failed ({type(exc).__name__}); falling back to AutoModelForCausalLM.")
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-            trust_remote_code=True,
+            **load_kwargs,
         )
 
     processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
 
+    if hasattr(model.config, "use_cache"):
+        model.config.use_cache = False
     if hasattr(model, "gradient_checkpointing_enable"):
         model.gradient_checkpointing_enable()
 
@@ -182,7 +245,7 @@ def _apply_lora_hf(
     finetune_mlp_modules: bool = True,
 ):
     """Apply LoRA via standard PEFT library."""
-    from peft import LoraConfig, get_peft_model
+    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
     if not finetune_vision_layers and not finetune_language_layers:
         raise ValueError(
@@ -227,6 +290,17 @@ def _apply_lora_hf(
             "No LoRA target modules matched. Check finetune_* flags and model architecture names."
         )
 
+    is_kbit_model = bool(
+        getattr(model, "is_loaded_in_4bit", False)
+        or getattr(model, "is_loaded_in_8bit", False)
+    )
+    if is_kbit_model:
+        print("Preparing HF model for k-bit training.")
+        model = prepare_model_for_kbit_training(
+            model,
+            use_gradient_checkpointing=True,
+        )
+
     print(f"Applying LoRA adapters [hf] (r={r}, alpha={alpha}, dropout={dropout})")
     print(f"  Matched {len(target_modules)} target modules.")
 
@@ -245,10 +319,17 @@ def _apply_lora_hf(
     return model
 
 
-def _load_hf_inference(model_path: str, load_in_4bit: bool = False) -> Tuple:
+def _load_hf_inference(
+    model_path: str,
+    load_in_4bit: bool = False,
+) -> Tuple:
     """Load model for inference via HuggingFace + PEFT."""
     from peft import PeftModel
     from transformers import AutoProcessor
+    try:
+        from transformers import AutoModelForImageTextToText as AutoHFVisionModel
+    except ImportError:
+        from transformers import AutoModelForVision2Seq as AutoHFVisionModel
 
     print(f"Loading model for inference [hf]: {model_path}")
 
@@ -260,7 +341,7 @@ def _load_hf_inference(model_path: str, load_in_4bit: bool = False) -> Tuple:
         base_model_name = adapter_config.get("base_model_name_or_path", model_path)
 
         print(f"  Detected LoRA adapter. Base model: {base_model_name}")
-        model, _ = _load_hf(base_model_name)
+        model, _ = _load_hf(base_model_name, load_in_4bit=load_in_4bit)
         model = PeftModel.from_pretrained(model, model_path)
         # Prefer processor/tokenizer from adapter dir so chat template changes
         # (including thinking behavior) are preserved after fine-tuning.
@@ -272,8 +353,36 @@ def _load_hf_inference(model_path: str, load_in_4bit: bool = False) -> Tuple:
             print("  Adapter processor not found; using base model processor.")
         print("  LoRA adapter loaded and applied.")
     else:
-        model, processor = _load_hf(model_path)
+        mode_label = "4-bit NF4" if load_in_4bit else "bf16"
+        print(f"  Inference precision: {mode_label}")
+        load_kwargs = _hf_inference_load_kwargs(model_path, load_in_4bit)
+        try:
+            model = AutoHFVisionModel.from_pretrained(
+                model_path,
+                **load_kwargs,
+            )
+        except Exception as exc:
+            if isinstance(exc, KeyError) and "qwen3_5" in str(exc):
+                raise RuntimeError(
+                    "Current transformers build does not support Qwen3.5 model_type 'qwen3_5'. "
+                    f"Installed transformers={transformers.__version__}. "
+                    "Upgrade transformers in the inference environment or use an Unsloth Qwen3-VL model."
+                ) from exc
+            from transformers import AutoModelForCausalLM
+            print(
+                f"Vision model auto-loader failed ({type(exc).__name__}); "
+                "falling back to AutoModelForCausalLM."
+            )
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                **load_kwargs,
+            )
+        processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
 
+    if hasattr(model, "gradient_checkpointing_disable"):
+        model.gradient_checkpointing_disable()
+    if hasattr(model.config, "use_cache"):
+        model.config.use_cache = True
     model.eval()
     print("Model loaded and set to inference mode.")
     return model, processor
@@ -434,22 +543,22 @@ def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
 def load_base_model(
     model_name: str,
     backend: str = "hf",
-    load_in_4bit: bool = True,
+    load_in_4bit: bool = False,
 ) -> Tuple:
     """Load a base model and its tokenizer/processor.
 
     Args:
         model_name: HuggingFace model ID or local path.
         backend: "unsloth" or "hf".
-        load_in_4bit: Use 4-bit quantization (only effective with unsloth backend).
+        load_in_4bit: Use 4-bit quantization. For HF this enables a
+            bitsandbytes NF4 QLoRA load when supported.
 
     Returns:
         Tuple of (model, tokenizer_or_processor).
     """
     if backend == "unsloth":
         return _load_unsloth(model_name, load_in_4bit)
-    else:
-        return _load_hf(model_name, load_in_4bit)
+    return _load_hf(model_name, load_in_4bit)
 
 
 def apply_lora_for_training(
@@ -490,22 +599,22 @@ def apply_lora_for_training(
 def load_model_for_inference(
     model_path: str,
     backend: str = "hf",
-    load_in_4bit: bool = True,
+    load_in_4bit: bool = False,
 ) -> Tuple:
     """Load a model for inference (auto-detects LoRA adapters).
 
     Args:
         model_path: Base model ID or path to a LoRA adapter directory.
         backend: "unsloth" or "hf".
-        load_in_4bit: Use 4-bit quantization (only effective with unsloth backend).
+        load_in_4bit: Use 4-bit quantization. For HF this enables a
+            bitsandbytes NF4 load when supported.
 
     Returns:
         Tuple of (model, tokenizer_or_processor).
     """
     if backend == "unsloth":
         return _load_unsloth_inference(model_path, load_in_4bit)
-    else:
-        return _load_hf_inference(model_path, load_in_4bit)
+    return _load_hf_inference(model_path, load_in_4bit)
 
 
 def generate_response(

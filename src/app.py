@@ -57,9 +57,9 @@ PROMPTS = {
 # ----- Available Models -----
 # Each entry maps a display name to (model_path, backend)
 MODELS = {
-    "LoRA (Grid-001-Qwen3.5-9B)": ("lora_model/grid_001_qwen3.5-9b_v3", "hf"),
+    "LoRA (Grid-002-Qwen3-VL-32B)": ("lora_model/grid_002_qwen3vl32b_v1", "unsloth"),
+    "LoRA (Grid-001-Qwen3.5-9B)": ("lora_model/grid_001_qwen3.5-9b_v1", "hf"),
     "Base Model (Qwen3.5-9B)": ("Qwen/Qwen3.5-9B", "hf"),
-    "LoRA (Grid-001-Qwen3-VL-32B)": ("lora_model/grid_001_qwen3vl32b_v1", "unsloth"),
     "Base Model (Qwen3.5-35B-A3B)": ("Qwen/Qwen3.5-35B-A3B", "hf"),
     "Base Model (Qwen3-VL-32B)": ("unsloth/Qwen3-VL-32B-Instruct-unsloth-bnb-4bit", "unsloth"),
     "Base Model (Qwen3-VL-8B)": ("unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit", "unsloth"),

@@ -1,29 +1,32 @@
 # ============================================================
-# Grid-001 LoRA Fine-Tuning Recipe (Qwen3.5-9B, HF)
+# Grid-002 LoRA Fine-Tuning Recipe (Qwen3-VL-32B, Unsloth)
 # ============================================================
-# Fine-tune Qwen3.5-9B on the grid-001 isometric image
-# cell-selection dataset (image -> coordinates).
+# Fine-tune Qwen3-VL-32B on the grid-002 isometric image
+# cell-selection dataset (image + pixel boundary -> grid index).
 #
-# Usage:
-#   python src/train.py --config recipes/grid-001-qwen3.5-9b.yaml --run_name grid_001_qwen3.5_9b_v1
+# Usage with train.sh:
+#   sbatch train.sh
+#
+# Optional override:
+#   sbatch --export=ALL,CONFIG_PATH=recipes/grid-002-qwen3vl32b.yaml,RUN_NAME=grid_002_qwen3vl32b_v1 train.sh
 # ============================================================
 
 # --- Model ---
-model_name: Qwen/Qwen3.5-9B
-backend: hf
-load_in_4bit: false  # Keep bf16 for this recipe; enable true to try HF QLoRA instead
+model_name: unsloth/Qwen3-VL-32B-Instruct-unsloth-bnb-4bit
+backend: unsloth
+load_in_4bit: true
 
 # --- Dataset ---
-dataset_path: dataset/grid-001/train_dataset.jsonl
-dataset_dir: dataset/grid-001
+dataset_path: dataset/grid-002/train_dataset.jsonl
+dataset_dir: dataset/grid-002
 
 # --- Run ---
-run_name: grid_001_qwen3.5_9b
+run_name: grid_002_qwen3vl32b
 
 # --- LoRA ---
-lora_r: 8
+lora_r: 16
 lora_alpha: 16
-lora_dropout: 0.05
+lora_dropout: 0.0
 finetune_vision_layers: true
 finetune_language_layers: true
 finetune_attention_modules: true

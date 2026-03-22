@@ -1,24 +1,27 @@
 # ============================================================
-# Grid-001 LoRA Fine-Tuning Recipe (Qwen3.5-9B, HF)
+# Grid-002 LoRA Fine-Tuning Recipe (Qwen3.5-27B, HF 4-bit QLoRA)
 # ============================================================
-# Fine-tune Qwen3.5-9B on the grid-001 isometric image
-# cell-selection dataset (image -> coordinates).
+# Fine-tune Qwen3.5-27B on the grid-002 isometric image
+# cell-selection dataset (image + pixel boundary -> grid index).
 #
-# Usage:
-#   python src/train.py --config recipes/grid-001-qwen3.5-9b.yaml --run_name grid_001_qwen3.5_9b_v1
+# This recipe uses the HF backend with bitsandbytes NF4 4-bit loading.
+# It is intentionally conservative for a first single-GPU attempt.
+#
+# Usage with train.sh:
+#   sbatch --export=ALL,CONFIG_PATH=recipes/grid-002-qwen3.5-27b-4bit.yaml,RUN_NAME=grid_002_qwen3.5_27b_4bit_v1 train.sh
 # ============================================================
 
 # --- Model ---
-model_name: Qwen/Qwen3.5-9B
+model_name: Qwen/Qwen3.5-27B
 backend: hf
-load_in_4bit: false  # Keep bf16 for this recipe; enable true to try HF QLoRA instead
+load_in_4bit: true
 
 # --- Dataset ---
-dataset_path: dataset/grid-001/train_dataset.jsonl
-dataset_dir: dataset/grid-001
+dataset_path: dataset/grid-002/train_dataset.jsonl
+dataset_dir: dataset/grid-002
 
 # --- Run ---
-run_name: grid_001_qwen3.5_9b
+run_name: grid_002_qwen3.5_27b_4bit
 
 # --- LoRA ---
 lora_r: 8
@@ -35,7 +38,7 @@ gradient_accumulation_steps: 8
 learning_rate: 5.0e-5
 num_epochs: 20
 warmup_steps: 10
-max_length: 512
+max_length: 384
 lr_scheduler_type: linear
 weight_decay: 0.01
 seed: 3407
