@@ -84,24 +84,24 @@ def _load_unsloth_inference(model_path: str, load_in_4bit: bool = True) -> Tuple
     return model, tokenizer
 
 
-def _generate_unsloth(model, tokenizer, image, prompt, **gen_kwargs) -> str:
-    """Generate response using Unsloth tokenizer API."""
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image", "image": image},
-            ],
-        }
-    ]
+def _generate_unsloth(model, tokenizer, images, prompt, **gen_kwargs) -> str:
+    """Generate response using Unsloth tokenizer API.
+
+    Args:
+        images: List of PIL Image objects.
+    """
+    user_content = [{"type": "text", "text": prompt}]
+    for img in images:
+        user_content.append({"type": "image", "image": img})
+
+    messages = [{"role": "user", "content": user_content}]
 
     input_text = tokenizer.apply_chat_template(
         messages, add_generation_prompt=True
     )
 
     inputs = tokenizer(
-        images=[image],
+        images=images,
         text=[input_text],
         add_special_tokens=False,
         return_tensors="pt",
@@ -341,8 +341,21 @@ def _load_hf_inference(
         base_model_name = adapter_config.get("base_model_name_or_path", model_path)
 
         print(f"  Detected LoRA adapter. Base model: {base_model_name}")
-        model, _ = _load_hf(base_model_name, load_in_4bit=load_in_4bit)
-        model = PeftModel.from_pretrained(model, model_path)
+        # Auto-disable 4-bit for MoE A3B models (not supported)
+        effective_4bit = load_in_4bit
+        if load_in_4bit and "a3b" in base_model_name.lower():
+            print("  Note: A3B (MoE) model detected — disabling 4-bit, using bf16.")
+            effective_4bit = False
+        model, _ = _load_hf(base_model_name, load_in_4bit=effective_4bit)
+        try:
+            model = PeftModel.from_pretrained(model, model_path)
+        except (TypeError, ValueError, RuntimeError) as exc:
+            raise RuntimeError(
+                f"Failed to apply LoRA adapter to base model '{base_model_name}'. "
+                "This typically happens when the model is partially CPU-offloaded "
+                "due to insufficient GPU VRAM. Try a node with more GPU memory "
+                "(e.g. watgpu508/708/808/1008 with >100GB VRAM)."
+            ) from exc
         # Prefer processor/tokenizer from adapter dir so chat template changes
         # (including thinking behavior) are preserved after fine-tuning.
         try:
@@ -388,8 +401,12 @@ def _load_hf_inference(
     return model, processor
 
 
-def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
-    """Generate response using HuggingFace processor API."""
+def _generate_hf(model, processor, images, prompt, **gen_kwargs) -> str:
+    """Generate response using HuggingFace processor API.
+
+    Args:
+        images: List of PIL Image objects.
+    """
     import re
 
     # Extract thinking controls.
@@ -416,15 +433,11 @@ def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
                 ),
             }
         )
-    messages.append(
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image", "image": image},
-            ],
-        }
-    )
+
+    user_content = [{"type": "text", "text": prompt}]
+    for img in images:
+        user_content.append({"type": "image", "image": img})
+    messages.append({"role": "user", "content": user_content})
 
     input_text = processor.apply_chat_template(
         messages,
@@ -440,7 +453,7 @@ def _generate_hf(model, processor, image, prompt, **gen_kwargs) -> str:
 
     inputs = processor(
         text=[input_text],
-        images=[image],
+        images=images if images else None,
         padding=True,
         return_tensors="pt",
     ).to(model.device)
@@ -620,8 +633,9 @@ def load_model_for_inference(
 def generate_response(
     model,
     tokenizer,
-    image: PILImage.Image,
     prompt: str,
+    image: Optional[PILImage.Image] = None,
+    images: Optional[list] = None,
     backend: str = "hf",
     max_new_tokens: int = 4096,
     temperature: float = 1.5,
@@ -631,13 +645,14 @@ def generate_response(
     show_thinking: bool = False,
     repetition_penalty: float = 1.2,
 ) -> str:
-    """Generate a response for an image and text prompt.
+    """Generate a response for image(s) and a text prompt.
 
     Args:
         model: The loaded model.
         tokenizer: The tokenizer (unsloth) or processor (hf).
-        image: A PIL Image object.
         prompt: Text instruction for the model.
+        image: A single PIL Image (backward compat — wrapped into a list).
+        images: List of PIL Image objects for multi-image prompts.
         backend: "unsloth" or "hf".
         max_new_tokens, temperature, min_p: Generation parameters.
         stream: If True, streams output to stdout.
@@ -650,6 +665,9 @@ def generate_response(
     Returns:
         The generated text response.
     """
+    # Resolve image list: prefer explicit images param, fallback to single image
+    resolved_images = images if images else ([image] if image else [])
+
     gen_kwargs = dict(
         max_new_tokens=max_new_tokens,
         use_cache=True,
@@ -659,8 +677,8 @@ def generate_response(
         repetition_penalty=repetition_penalty,
     )
     if backend == "unsloth":
-        return _generate_unsloth(model, tokenizer, image, prompt, **gen_kwargs)
+        return _generate_unsloth(model, tokenizer, resolved_images, prompt, **gen_kwargs)
     else:
         gen_kwargs["thinking_budget"] = thinking_budget
         gen_kwargs["show_thinking"] = show_thinking
-        return _generate_hf(model, tokenizer, image, prompt, **gen_kwargs)
+        return _generate_hf(model, tokenizer, resolved_images, prompt, **gen_kwargs)

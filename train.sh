@@ -6,7 +6,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-
+#SBATCH --nodelist=watgpu508,watgpu708,watgpu808,watgpu1008
 
 #SBATCH -o logs/JOB%j.out
 #SBATCH -e logs/JOB%j-err.out
@@ -51,8 +51,8 @@ echo "Date: $(date)"
 # Default recipe for this script.
 # Override at submit time, for example:
 #   sbatch --export=ALL,CONFIG_PATH=recipes/grid-001-qwen3vl32b.yaml,RUN_NAME=grid_001_qwen3vl32b_v1 train.sh
-CONFIG_PATH="${CONFIG_PATH:-recipes/grid-002-qwen3vl32b.yaml}"
-RUN_NAME="${RUN_NAME:-grid_002_qwen3vl32b_v1}"
+CONFIG_PATH="${CONFIG_PATH:-recipes/grid-003-qwen3.5-35b.yaml}"
+RUN_NAME="${RUN_NAME:-grid_003_qwen3.5_35b_v1}"
 
 echo "Config: $CONFIG_PATH"
 echo "Run name: $RUN_NAME"

@@ -74,9 +74,39 @@ Return strictly raw JSON (no markdown, no explanation):
 }
 """
 
+GRID_003_SYSTEM_PROMPT = (
+    "You are an expert spatial reasoning AI specializing in isometric game engines. "
+    "Your task is to analyze an isometric scene and map the visual application of a specific texture to its corresponding grid index.\n\n"
+    "Multimodal Input Structure:\n"
+    "You will be provided with two images and one set of numerical metadata for each analysis:\n"
+    "1.  **Image A (Isometric Sandbox):** The primary scene view showing an 8×8 isometric grid. "
+    "The selected cell is indicated by a red-colored texture applied to it.\n"
+    "2.  **Image B (Brush Texture):** A 64x64 square texture image (the \"brush\"). In the sandbox image, this square texture is projected onto a specific grid cell, transforming it visually into an isometric diamond shape.\n"
+    "3.  **Metadata (Pixel Boundary):** A numerical array representing the standard 2D pixel bounding box `[originalX, originalY, width, height]` of the applied texture brush *within Image A (Isometric Sandbox)*.\n\n"
+    "Mapping Rules:\n"
+    "1.  The grid is exactly 8×8. Valid indices range from 0 to 7 for both `i` and `j`. Never output a value outside [0, 7].\n"
+    "2.  The topmost cell of the diamond is `[0, 0]`.\n"
+    "3.  `i` axis: increases going DOWN-RIGHT from the top. The cells along the top-right edge of the diamond are `[0,0], [1,0], [2,0], ..., [7,0]`.\n"
+    "4.  `j` axis: increases going DOWN-LEFT from the top. The cells along the top-left edge of the diamond are `[0,0], [0,1], [0,2], ..., [0,7]`.\n"
+    "5.  The bottom-most cell of the diamond is `[7, 7]`.\n\n"
+    "Before answering, verify:\n"
+    "- Are both `i` and `j` in the range [0, 7]?\n"
+    "- Is `i` the position along the down-RIGHT diagonal, and `j` along the down-LEFT diagonal? Do not swap them.\n\n"
+    "Output Mandate:\n"
+    "Based on the provided images and pixel boundary, calculate the precise grid index. "
+    'You must return ONLY valid JSON format with the coordinates: `{"index": [i, j]}`. Do not include any conversational text.'
+)
+
+GRID_003_USER_PROMPT_TEMPLATE = (
+    "Analyzing current scene and brush. "
+    "<image_0> (Isometric Sandbox) <image_1> (64x64 Brush Texture)"
+    "Pixel boundary: [{pixel_boundary}]"
+)
+
 # A dictionary to easily look up prompts by name
 PROMPTS = {
     "basic": BASIC_PROMPT,
     "expert_reasoning": EXPERT_REASONING_PROMPT,
     "grid_test": GRID_TEST_PROMPT,
+    "grid_003": GRID_003_USER_PROMPT_TEMPLATE,
 }

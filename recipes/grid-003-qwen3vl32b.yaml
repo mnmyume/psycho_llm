@@ -1,32 +1,32 @@
 # ============================================================
-# Grid-002 LoRA Fine-Tuning Recipe (Qwen3.5-27B, HF 4-bit QLoRA)
+# Grid-003 LoRA Fine-Tuning Recipe (Qwen3-VL-32B, Unsloth)
 # ============================================================
-# Fine-tune Qwen3.5-27B on the grid-002 isometric image
-# cell-selection dataset (image + pixel boundary -> grid index).
-#
-# This recipe uses the HF backend with bitsandbytes NF4 4-bit loading.
-# It is intentionally conservative for a first single-GPU attempt.
+# Fine-tune Qwen3-VL-32B on the grid-003 multi-image isometric
+# texture mapping dataset (scene + brush + boundary -> grid index).
 #
 # Usage with train.sh:
-#   sbatch --export=ALL,CONFIG_PATH=recipes/grid-002-qwen3.5-27b-4bit.yaml,RUN_NAME=grid_002_qwen3.5_27b_4bit_v1 train.sh
+#   sbatch train.sh
+#
+# Optional override:
+#   sbatch --export=ALL,CONFIG_PATH=recipes/grid-003-qwen3vl32b.yaml,RUN_NAME=grid_003_qwen3vl32b_v1 train.sh
 # ============================================================
 
 # --- Model ---
-model_name: Qwen/Qwen3.5-27B
-backend: hf
+model_name: unsloth/Qwen3-VL-32B-Instruct-unsloth-bnb-4bit
+backend: unsloth
 load_in_4bit: true
 
 # --- Dataset ---
-dataset_path: dataset/grid-002/train_dataset.jsonl
-dataset_dir: dataset/grid-002
+dataset_path: dataset/grid-003/train_dataset.jsonl
+dataset_dir: dataset/grid-003
 
 # --- Run ---
-run_name: grid_002_qwen3.5_27b_4bit
+run_name: grid_003_qwen3vl32b
 
 # --- LoRA ---
-lora_r: 8
+lora_r: 16
 lora_alpha: 16
-lora_dropout: 0.05
+lora_dropout: 0.0
 finetune_vision_layers: true
 finetune_language_layers: true
 finetune_attention_modules: true
@@ -38,7 +38,7 @@ gradient_accumulation_steps: 8
 learning_rate: 5.0e-5
 num_epochs: 20
 warmup_steps: 10
-max_length: 384
+max_length: 512
 lr_scheduler_type: linear
 weight_decay: 0.01
 seed: 3407

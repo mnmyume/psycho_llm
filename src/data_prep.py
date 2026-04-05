@@ -196,23 +196,37 @@ def build_coordinate_reasoning(coordinates: list[int]) -> str:
 
 
 def build_sample(
-    image_abs_path: str,
-    response_payload: dict,
-    user_prompt: str,
+    image_abs_path: str | None = None,
+    response_payload: dict = None,
+    user_prompt: str = "",
     system_prompt: str | None = None,
     reasoning_content: str | None = None,
+    image_paths: list[str] | None = None,
 ) -> dict:
     """Build a single JSONL sample in the Qwen3-VL multimodal chat format.
+
+    Supports both single-image and multi-image samples.
+
+    Args:
+        image_abs_path: Single image path (legacy, used if image_paths is None).
+        image_paths: List of absolute image paths for multi-image samples.
+        response_payload: The assistant response dict to serialize as JSON.
+        user_prompt: The user prompt text.
+        system_prompt: Optional system prompt text.
+        reasoning_content: Optional reasoning trace for the assistant.
 
     The format mirrors the existing EmoArt data loader:
       messages = [
           {role: system,    content: [{type: text, ...}]},
-          {role: user,      content: [{type: text, ...}, {type: image, ...}]},
+          {role: user,      content: [{type: text, ...}, {type: image, ...}, ...]},
           {role: assistant,  content: [{type: text, ...}]},
       ]
     """
+    # Resolve image list: prefer explicit image_paths, fallback to single image_abs_path
+    resolved_images = image_paths if image_paths else ([image_abs_path] if image_abs_path else [])
+
     response_json = json.dumps(
-        response_payload,
+        response_payload or {},
         ensure_ascii=False,
     )
 
@@ -232,15 +246,11 @@ def build_sample(
             }
         )
 
-    messages.append(
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": user_prompt},
-                {"type": "image", "image": image_abs_path},
-            ],
-        }
-    )
+    user_content = [{"type": "text", "text": user_prompt}]
+    for img_path in resolved_images:
+        user_content.append({"type": "image", "image": img_path})
+
+    messages.append({"role": "user", "content": user_content})
     messages.append(assistant_message)
 
     return {"messages": messages}
@@ -411,13 +421,49 @@ def prepare_csv_dataset(args) -> tuple[int, int]:
     return written, skipped
 
 
+def _resolve_tile_source(annotation_data: dict, dataset_dir: Path, sample_name: str) -> str | None:
+    """Resolve the tileSource field to an absolute image path.
+
+    Returns None with a warning if the tile source image is missing.
+    """
+    tile_source = annotation_data.get("tileSource")
+    if not tile_source:
+        return None
+
+    tile_path = dataset_dir / tile_source
+    if not tile_path.is_file():
+        print(f"  ⚠  Sample {sample_name}: tileSource not found: {tile_path}")
+        return None
+
+    return str(tile_path.resolve())
+
+
+def _substitute_user_prompt_vars(user_prompt: str, annotation_data: dict) -> str:
+    """Substitute template variables in user prompts.
+
+    Currently handles:
+        ${pixelBoundary} → comma-separated boundary values from the annotation.
+    """
+    boundary = annotation_data.get("boundary")
+    if boundary and "${pixelBoundary}" in user_prompt:
+        boundary_str = ", ".join(str(v) for v in boundary)
+        user_prompt = user_prompt.replace("${pixelBoundary}", boundary_str)
+    return user_prompt
+
+
 def prepare_sidecar_json_dataset(args) -> tuple[int, int]:
-    """Build JSONL samples from per-image sidecar JSON annotations."""
+    """Build JSONL samples from per-image sidecar JSON annotations.
+
+    Supports both single-image (grid-002) and multi-image (grid-003) datasets.
+    Multi-image samples are detected via the `tileSource` key in the sidecar JSON.
+    """
     dataset_dir = Path(args.dataset_dir or args.image_dir).resolve()
     output_path = args.output
     annotation_ext = normalize_extension(args.annotation_ext)
     image_ext = normalize_extension(args.image_ext)
     exclude_keys = set(args.sidecar_exclude_keys or [])
+    # Always exclude tileSource from the assistant response — it's input metadata
+    exclude_keys.add("tileSource")
 
     if not dataset_dir.is_dir():
         print(f"ERROR: Dataset directory not found: {dataset_dir}")
@@ -487,10 +533,19 @@ def prepare_sidecar_json_dataset(args) -> tuple[int, int]:
                 skipped += 1
                 continue
 
+            # Substitute template variables (e.g. ${pixelBoundary})
+            user_prompt = _substitute_user_prompt_vars(user_prompt.strip(), annotation_data)
+
+            # Build image list: primary image + optional tileSource (brush texture)
+            image_list = [str(image_path.resolve())]
+            tile_abs_path = _resolve_tile_source(annotation_data, dataset_dir, sample_name)
+            if tile_abs_path:
+                image_list.append(tile_abs_path)
+
             sample = build_sample(
-                image_abs_path=str(image_path.resolve()),
+                image_paths=image_list,
                 response_payload=response_payload,
-                user_prompt=user_prompt.strip(),
+                user_prompt=user_prompt,
                 system_prompt=system_prompt.strip(),
             )
             out_file.write(json.dumps(sample, ensure_ascii=False) + "\n")

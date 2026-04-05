@@ -1,0 +1,49 @@
+# ============================================================
+# Grid-003 LoRA Fine-Tuning Recipe (Qwen3.5-35B-A3B, HF bf16)
+# ============================================================
+# Fine-tune Qwen3.5-35B-A3B on the grid-003 multi-image isometric
+# texture mapping dataset (scene + brush + boundary -> grid index).
+#
+# This recipe uses the HF backend in bf16 (no quantization).
+# Requires a high-memory GPU node (>100GB VRAM).
+#
+# Usage with train.sh:
+#   sbatch train.sh
+# ============================================================
+
+# --- Model ---
+model_name: Qwen/Qwen3.5-35B-A3B
+backend: hf
+load_in_4bit: false
+
+# --- Dataset ---
+dataset_path: dataset/grid-003/train_dataset.jsonl
+dataset_dir: dataset/grid-003
+
+# --- Run ---
+run_name: grid_003_qwen3.5_35b
+
+# --- LoRA ---
+lora_r: 16
+lora_alpha: 16
+lora_dropout: 0.0
+finetune_vision_layers: true
+finetune_language_layers: true
+finetune_attention_modules: true
+finetune_mlp_modules: true
+
+# --- Training ---
+batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 5.0e-5
+num_epochs: 20
+warmup_steps: 10
+max_length: 2048
+lr_scheduler_type: linear
+weight_decay: 0.01
+seed: 3407
+
+# --- Inference ---
+inference_max_tokens: 4096
+inference_temperature: 0.1
+inference_min_p: 0.1

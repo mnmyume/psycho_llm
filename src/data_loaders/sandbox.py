@@ -4,6 +4,9 @@ JSONL dataset loader for multimodal chat-style image fine-tuning datasets.
 Loads a JSONL file produced by data_prep.py and exposes it as a Hugging Face
 Dataset ready for SFTTrainer LoRA fine-tuning.
 
+Supports both single-image and multi-image samples (e.g. grid-003 with scene +
+brush texture).
+
 Dataset structure:
     train_dataset.jsonl — Each line is a JSON object with keys:
         - messages: list of system/user/assistant messages (multimodal chat format)
@@ -22,8 +25,12 @@ class SandboxDataset(BaseDataset):
     the image column for automatic PIL loading by the SFTTrainer /
     UnslothVisionDataCollator pipeline.
 
+    Supports multi-image samples: when a user message contains multiple
+    ``{type: "image"}`` entries, all paths are extracted into an ``images``
+    list column, and each is cast to an HF ``Image()`` feature.
+
     Args:
-        annotation_path: Path to the JSONL file (e.g. dataset/grid-002/train_dataset.jsonl).
+        annotation_path: Path to the JSONL file (e.g. dataset/grid-003/train_dataset.jsonl).
         data_dir: Not used for path resolution (images already have absolute
                   paths in the JSONL), but kept for API consistency with BaseDataset.
     """
@@ -42,8 +49,8 @@ class SandboxDataset(BaseDataset):
 
         Steps:
             1. Load the JSONL via Hugging Face datasets
-            2. Extract the first image path from the messages structure
-            3. Cast the image column for automatic PIL loading
+            2. Extract image paths from the messages structure
+            3. Cast image columns for automatic PIL loading
         """
         if not os.path.isfile(self.path):
             raise FileNotFoundError(
@@ -63,23 +70,32 @@ class SandboxDataset(BaseDataset):
             split="train",
         )
 
-        def _extract_image(example):
-            """Pull the first image path out of messages into a top-level column."""
-            example["image"] = None
+        def _extract_images(example):
+            """Pull all image paths out of messages into top-level columns.
+
+            Sets:
+                example["images"]: list of all image paths found in messages
+                example["image"]:  first image path (backward compat)
+            """
+            img_paths = []
             for message in example["messages"]:
                 content = message.get("content")
                 if not isinstance(content, list):
                     continue
                 for part in content:
                     if isinstance(part, dict) and part.get("type") == "image" and part.get("image"):
-                        example["image"] = part["image"]
-                        return example
+                        img_paths.append(part["image"])
+            example["images"] = img_paths
+            example["image"] = img_paths[0] if img_paths else None
             return example
 
-        self.data = hf_dataset.map(_extract_image)
-        missing_images = sum(image is None for image in self.data["image"])
+        self.data = hf_dataset.map(_extract_images)
+
+        missing_images = sum(not imgs for imgs in self.data["images"])
         if missing_images:
             raise ValueError(
                 f"Dataset JSONL is missing image content in {missing_images} samples: {self.path}"
             )
+
+        # Cast the primary image column for PIL loading
         self.data = self.data.cast_column("image", Image())

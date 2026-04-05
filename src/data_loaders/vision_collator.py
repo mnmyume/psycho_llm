@@ -89,7 +89,7 @@ class VisionDataCollator:
             text=[text],
             images=images if images else None,
             padding=False,
-            truncation=True,
+            truncation=False,
             max_length=self.max_length,
             return_tensors="pt",
         )
