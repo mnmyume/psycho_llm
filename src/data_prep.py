@@ -1,7 +1,7 @@
 """
 Dataset preparation script for multimodal fine-tuning datasets.
 
-Supports two annotation sources and writes a JSONL file in the multimodal chat
+Supports three annotation sources and writes a JSONL file in the multimodal chat
 format expected by SFTTrainer.
 
 Usage:
@@ -21,6 +21,13 @@ Usage:
         --dataset_dir dataset/grid-002 \
         --output dataset/grid-002/train_dataset.jsonl
 
+    # Filename-labelled images (grid-004 flow):
+    python src/data_prep.py \
+        --source_type filename_label \
+        --dataset_dir dataset/grid-004 \
+        --output dataset/grid-004/train_dataset.jsonl \
+        --filename_pattern 'grid_index_{i}_{j}'
+
 Supported CSV schemas:
     image_filename,chaos_tidy_score,monotony_variety_score[,reasoning|explanation]
     my_image.png,3,2,...
@@ -35,16 +42,21 @@ Supported sidecar JSON schema:
       "index": [0, 0],
       "boundary": [278, 221, ...]
     }
+
+Supported filename_label schema:
+    Filenames encode coordinates as grid_index_{i}_{j}.png
+    e.g. grid_index_0_0.png → coordinates [0, 0]
 """
 
 import argparse
 import csv
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
-from prompts import PROMPTS
+from prompts import GRID_004_SYSTEM_PROMPT, GRID_004_USER_PROMPT, PROMPTS
 
 
 SIDECAR_PROMPT_KEYS = {"system_prompt", "user_prompt"}
@@ -59,10 +71,10 @@ def parse_args():
         "--source_type",
         type=str,
         default="auto",
-        choices=["auto", "csv", "sidecar_json"],
+        choices=["auto", "csv", "sidecar_json", "filename_label"],
         help=(
             "Annotation source type. 'auto' uses sidecar_json when --dataset_dir is set, "
-            "otherwise falls back to csv."
+            "otherwise falls back to csv. 'filename_label' extracts labels from filenames."
         ),
     )
     parser.add_argument(
@@ -115,6 +127,15 @@ def parse_args():
         help=(
             "Keys to omit from the assistant response payload when reading sidecar JSON files. "
             "Defaults to excluding 'boundary' because it is already present in the user prompt."
+        ),
+    )
+    parser.add_argument(
+        "--filename_pattern",
+        type=str,
+        default="grid_index_{i}_{j}",
+        help=(
+            "Filename pattern with {i} and {j} placeholders for extracting grid coordinates. "
+            "Used only with --source_type filename_label."
         ),
     )
     return parser.parse_args()
@@ -554,6 +575,88 @@ def prepare_sidecar_json_dataset(args) -> tuple[int, int]:
     return written, skipped
 
 
+def _compile_filename_pattern(pattern: str) -> re.Pattern:
+    """Compile a filename pattern with {i} and {j} placeholders into a regex."""
+    regex = re.escape(pattern)
+    regex = regex.replace(r"\{i\}", r"(?P<i>\d+)")
+    regex = regex.replace(r"\{j\}", r"(?P<j>\d+)")
+    return re.compile(f"^{regex}$")
+
+
+def prepare_filename_label_dataset(args) -> tuple[int, int]:
+    """Build JSONL samples from filename-labelled images (grid-004 style).
+
+    Coordinates are extracted from filenames using a pattern like
+    'grid_index_{i}_{j}' where {i} and {j} are integer placeholders.
+    """
+    dataset_dir = Path(args.dataset_dir or args.image_dir).resolve()
+    output_path = args.output
+    image_ext = normalize_extension(args.image_ext)
+    pattern = _compile_filename_pattern(args.filename_pattern)
+
+    if not dataset_dir.is_dir():
+        print(f"ERROR: Dataset directory not found: {dataset_dir}")
+        sys.exit(1)
+
+    image_paths = sorted(dataset_dir.glob(f"*{image_ext}"))
+    if not image_paths:
+        print(
+            f"ERROR: No image files with extension {image_ext!r} "
+            f"found in {dataset_dir}"
+        )
+        sys.exit(1)
+
+    print("=" * 60)
+    print("  Psycho LLM — Dataset Preparation")
+    print("  Source:    filename_label")
+    print(f"  Dataset:   {dataset_dir}")
+    print(f"  Output:    {output_path}")
+    print(f"  Pattern:   {args.filename_pattern}")
+    print(f"  Images:    {len(image_paths)} files")
+    print("=" * 60)
+
+    written = 0
+    skipped = 0
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    with open(output_path, "w", encoding="utf-8") as out_file:
+        for image_path in image_paths:
+            stem = image_path.stem
+            match = pattern.match(stem)
+
+            if not match:
+                print(f"  ⚠  Image {stem}: filename does not match pattern '{args.filename_pattern}'")
+                skipped += 1
+                continue
+
+            try:
+                i = int(match.group("i"))
+                j = int(match.group("j"))
+            except (ValueError, IndexError):
+                print(f"  ⚠  Image {stem}: could not parse coordinates from filename")
+                skipped += 1
+                continue
+
+            if not (0 <= i <= 7 and 0 <= j <= 7):
+                print(f"  ⚠  Image {stem}: coordinates [{i}, {j}] out of valid range [0-7]")
+                skipped += 1
+                continue
+
+            response_payload = {"coordinates": [i, j]}
+
+            sample = build_sample(
+                image_abs_path=str(image_path.resolve()),
+                response_payload=response_payload,
+                user_prompt=GRID_004_USER_PROMPT,
+                system_prompt=GRID_004_SYSTEM_PROMPT,
+            )
+            out_file.write(json.dumps(sample, ensure_ascii=False) + "\n")
+            written += 1
+
+    return written, skipped
+
+
 def print_summary(output_path: str, written: int, skipped: int):
     """Print a shared success summary after dataset generation."""
     total = written + skipped
@@ -568,6 +671,8 @@ def main():
 
     if source_type == "csv":
         written, skipped = prepare_csv_dataset(args)
+    elif source_type == "filename_label":
+        written, skipped = prepare_filename_label_dataset(args)
     else:
         written, skipped = prepare_sidecar_json_dataset(args)
 

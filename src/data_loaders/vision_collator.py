@@ -14,6 +14,8 @@ generates an extra <|image_pad|> for the None image key. We strip these.
 import torch
 from PIL import Image as PILImage
 
+from chat_template_utils import apply_chat_template_with_fallback
+
 
 class VisionDataCollator:
     """Collator for multimodal (image + text) supervised fine-tuning.
@@ -80,8 +82,11 @@ class VisionDataCollator:
         clean_messages, images = self._clean_messages(example["messages"])
 
         # Apply chat template
-        text = self.processor.apply_chat_template(
-            clean_messages, tokenize=False, add_generation_prompt=False,
+        text = apply_chat_template_with_fallback(
+            self.processor,
+            clean_messages,
+            tokenize=False,
+            add_generation_prompt=False,
         )
 
         # Process: tokenize text + encode images
@@ -107,7 +112,9 @@ class VisionDataCollator:
         all_input_ids = []
         all_attention_mask = []
         all_labels = []
+        all_mm_token_type_ids = []
         all_pixel_values = []
+        all_image_position_ids = []
         all_image_grid_thw = []
         has_vision = any("pixel_values" in item for item in batch_items)
 
@@ -139,9 +146,23 @@ class VisionDataCollator:
                 labels[-pad_len:] = -100
             all_labels.append(labels)
 
+            if "mm_token_type_ids" in item:
+                mm_token_type_ids = item["mm_token_type_ids"].squeeze(0)
+                if pad_len > 0:
+                    mm_token_type_ids = torch.cat([
+                        mm_token_type_ids,
+                        torch.zeros(pad_len, dtype=mm_token_type_ids.dtype),
+                    ])
+                all_mm_token_type_ids.append(mm_token_type_ids)
+
             # Collect vision tensors
             if has_vision and "pixel_values" in item:
-                all_pixel_values.append(item["pixel_values"].squeeze(0))
+                if "image_position_ids" in item:
+                    all_pixel_values.append(item["pixel_values"])
+                else:
+                    all_pixel_values.append(item["pixel_values"].squeeze(0))
+                if "image_position_ids" in item:
+                    all_image_position_ids.append(item["image_position_ids"])
                 if "image_grid_thw" in item:
                     # Don't squeeze — keep [1, 3] so torch.cat gives [N, 3]
                     all_image_grid_thw.append(item["image_grid_thw"])
@@ -151,9 +172,13 @@ class VisionDataCollator:
             "attention_mask": torch.stack(all_attention_mask),
             "labels": torch.stack(all_labels),
         }
+        if all_mm_token_type_ids:
+            batch["mm_token_type_ids"] = torch.stack(all_mm_token_type_ids)
 
         if all_pixel_values:
             batch["pixel_values"] = torch.cat(all_pixel_values, dim=0)
+        if all_image_position_ids:
+            batch["image_position_ids"] = torch.cat(all_image_position_ids, dim=0)
         if all_image_grid_thw:
             batch["image_grid_thw"] = torch.cat(all_image_grid_thw, dim=0)
 

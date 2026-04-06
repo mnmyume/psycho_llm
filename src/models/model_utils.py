@@ -19,6 +19,7 @@ from typing import Optional, Tuple
 import transformers
 
 from transformers import TextStreamer
+from chat_template_utils import apply_chat_template_with_fallback
 
 
 # ============================================================
@@ -224,8 +225,17 @@ def _load_hf(
             **load_kwargs,
         )
 
-    processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
-
+    try:
+        processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
+    except ImportError as exc:
+        err = str(exc)
+        if "ReasoningEffort" in err and "mistral_common" in err:
+            raise RuntimeError(
+                "Gemma 4 processor loading requires a newer mistral_common package. "
+                "Please upgrade the training environment to mistral_common>=1.10.0 "
+                "and retry."
+            ) from exc
+        raise
     if hasattr(model.config, "use_cache"):
         model.config.use_cache = False
     if hasattr(model, "gradient_checkpointing_enable"):
@@ -257,6 +267,11 @@ def _apply_lora_hf(
         module_suffixes.extend(["q_proj", "k_proj", "v_proj", "o_proj"])
     if finetune_mlp_modules:
         module_suffixes.extend(["gate_proj", "up_proj", "down_proj"])
+    if finetune_vision_layers:
+        # Gemma 4 exposes a separate multimodal bridge as `embed_vision`.
+        # Adapting that projection alongside the vision tower is useful for
+        # image-heavy tasks and is not covered by the standard attn/MLP suffixes.
+        module_suffixes.extend(["embedding_projection"])
 
     if not module_suffixes:
         raise ValueError(
@@ -264,25 +279,57 @@ def _apply_lora_hf(
         )
 
     def _is_vision_module(name: str) -> bool:
-        return any(tok in name for tok in ("visual", "vision_tower", "vision_model"))
+        return any(
+            tok in name
+            for tok in (
+                "visual",
+                "vision_tower",
+                "vision_model",
+                "embed_vision",
+                "multimodal_projector",
+                "multi_modal_projector",
+                "image_projection",
+                "vision_proj",
+            )
+        )
 
     def _is_language_module(name: str) -> bool:
         return any(tok in name for tok in ("model.layers", "language_model", "lm_head"))
 
+    def _resolve_supported_lora_target(module_name: str, module) -> Tuple[str, bool]:
+        """Redirect wrapper modules to a PEFT-supported leaf module when possible."""
+        if isinstance(module, torch.nn.Linear):
+            return module_name, False
+
+        inner_linear = getattr(module, "linear", None)
+        if isinstance(inner_linear, torch.nn.Linear):
+            return f"{module_name}.linear", True
+
+        return module_name, False
+
     target_modules = []
-    for module_name, _ in model.named_modules():
+    redirected_modules = []
+    for module_name, module in model.named_modules():
         if not any(module_name.endswith(f".{suffix}") for suffix in module_suffixes):
             continue
 
         is_vision = _is_vision_module(module_name)
         is_language = _is_language_module(module_name)
+        resolved_module_name, was_redirected = _resolve_supported_lora_target(module_name, module)
 
+        is_selected = False
         if finetune_vision_layers and finetune_language_layers:
-            target_modules.append(module_name)
+            target_modules.append(resolved_module_name)
+            is_selected = True
         elif finetune_vision_layers and is_vision:
-            target_modules.append(module_name)
+            target_modules.append(resolved_module_name)
+            is_selected = True
         elif finetune_language_layers and is_language:
-            target_modules.append(module_name)
+            target_modules.append(resolved_module_name)
+            is_selected = True
+
+        if is_selected and was_redirected:
+            redirected_modules.append((module_name, resolved_module_name))
 
     target_modules = sorted(set(target_modules))
     if not target_modules:
@@ -303,6 +350,11 @@ def _apply_lora_hf(
 
     print(f"Applying LoRA adapters [hf] (r={r}, alpha={alpha}, dropout={dropout})")
     print(f"  Matched {len(target_modules)} target modules.")
+    if redirected_modules:
+        print(
+            f"  Redirected {len(set(redirected_modules))} wrapped modules to supported leaf linears "
+            "(for example Gemma4ClippableLinear -> .linear)."
+        )
 
     lora_config = LoraConfig(
         r=r,
@@ -439,7 +491,8 @@ def _generate_hf(model, processor, images, prompt, **gen_kwargs) -> str:
         user_content.append({"type": "image", "image": img})
     messages.append({"role": "user", "content": user_content})
 
-    input_text = processor.apply_chat_template(
+    input_text = apply_chat_template_with_fallback(
+        processor,
         messages,
         add_generation_prompt=True,
         tokenize=False,

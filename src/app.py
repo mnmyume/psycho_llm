@@ -46,6 +46,8 @@ from prompts import (
     GRID_TEST_PROMPT,
     GRID_003_SYSTEM_PROMPT,
     GRID_003_USER_PROMPT_TEMPLATE,
+    GRID_004_SYSTEM_PROMPT,
+    GRID_004_USER_PROMPT,
 )
 
 
@@ -54,6 +56,7 @@ PROMPTS = {
     "Sandbox Scoring": EXPERT_REASONING_PROMPT,
     "Grid Cell Selection": GRID_TEST_PROMPT,
     "Grid-003 Texture Mapping": GRID_003_USER_PROMPT_TEMPLATE,
+    "Grid-004 Cell Selection": GRID_004_USER_PROMPT,
     "Custom Prompt": "",
 }
 
@@ -67,6 +70,7 @@ BOUNDARY_PROMPTS = {"Grid-003 Texture Mapping"}
 # ----- Available Models -----
 # Each entry maps a display name to (model_path, backend)
 MODELS = {
+    "LoRA (Grid-004-Gemma4-31B)": ("lora_model/grid_004_gemma4_31b_v1", "hf"),
     "LoRA (Grid-003-Qwen3.5-35B)": ("lora_model/grid_003_qwen3.5_35b_v1", "hf"),
     "LoRA (Grid-003-Qwen3-VL-32B)": ("lora_model/grid_003_qwen3vl32b_v1", "unsloth"),
     "LoRA (Grid-002-Qwen3-VL-32B)": ("lora_model/grid_002_qwen3vl32b_v1", "unsloth"),
@@ -76,6 +80,7 @@ MODELS = {
     "Base Model (Qwen3-VL-32B)": ("unsloth/Qwen3-VL-32B-Instruct-unsloth-bnb-4bit", "unsloth"),
     "Base Model (Qwen3-VL-8B)": ("unsloth/Qwen3-VL-8B-Instruct-unsloth-bnb-4bit", "unsloth"),
 }
+DEFAULT_MODEL_KEY = "LoRA (Grid-004-Gemma4-31B)"
 
 # Global variables to cache the currently loaded model and its path
 current_model = None
@@ -148,12 +153,14 @@ def create_app(initial_model_path):
             if prompt_type in MULTI_IMAGE_PROMPTS and brush_image is not None:
                 images.append(brush_image)
 
-            # Determine system prompt for grid-003
+            # Determine system prompt for prompt types that use one
             system_prompt = None
             if prompt_type == "Grid-003 Texture Mapping":
                 system_prompt = GRID_003_SYSTEM_PROMPT
+            elif prompt_type == "Grid-004 Cell Selection":
+                system_prompt = GRID_004_SYSTEM_PROMPT
 
-            # For grid-003, prepend system prompt into the prompt
+            # Prepend the system prompt into the prompt when applicable
             # (since generate_response doesn't have a system_prompt param,
             #  we use the full prompt text which already contains the instructions)
             final_prompt = prompt
@@ -225,14 +232,14 @@ def create_app(initial_model_path):
 
                 model_selector = gr.Dropdown(
                     choices=list(MODELS.keys()),
-                    value=list(MODELS.keys())[0],
+                    value=DEFAULT_MODEL_KEY,
                     label="Selected Model",
                     info="If you change this, the new model will be loaded on the first request (which takes a minute).",
                 )
 
                 prompt_type = gr.Dropdown(
                     choices=list(PROMPTS.keys()),
-                    value="Grid-003 Texture Mapping",
+                    value="Grid-004 Cell Selection",
                     label="Analysis Type",
                 )
 
@@ -303,7 +310,7 @@ def main():
     parser = argparse.ArgumentParser(description="Launch the Psycho LLM web UI.")
     parser.add_argument(
         "--model_path", type=str, default=None,
-        help="Path to LoRA adapter directory or base model ID. Defaults to the first model in the MODELS list.",
+        help="Path to LoRA adapter directory or base model ID. Defaults to the configured default model in MODELS.",
     )
     parser.add_argument(
         "--port", type=int, default=7860,
@@ -315,13 +322,12 @@ def main():
     )
     args = parser.parse_args()
 
-    # Resolve initial model: use --model_path if provided, otherwise first entry in MODELS
+    # Resolve initial model: use --model_path if provided, otherwise the configured default model
     if args.model_path:
         initial_model_path = args.model_path
         initial_backend = "hf"
     else:
-        first_key = list(MODELS.keys())[0]
-        initial_model_path, initial_backend = MODELS[first_key]
+        initial_model_path, initial_backend = MODELS[DEFAULT_MODEL_KEY]
 
     # Load the initial model
     print(f"Loading initial model for the web UI: {initial_model_path}")

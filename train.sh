@@ -48,15 +48,25 @@ echo "Date: $(date)"
 #     --config recipes/sandbox-001-qwen3.5-9b.yaml \
 #     --run_name "sandbox_001_qwen3.5-9b_v5"
 
+# --- Grid-004 (Gemma 4 31B, vision LoRA) ---
+# Default target for this script:
+#   sbatch train.sh
+#
+# Optional override:
+#   sbatch --export=ALL,CONFIG_PATH=recipes/grid-004-gemma-4-31b.yaml,RUN_NAME=grid_004_gemma4_31b_v1 train.sh
+
 # Default recipe for this script.
 # Override at submit time, for example:
 #   sbatch --export=ALL,CONFIG_PATH=recipes/grid-001-qwen3vl32b.yaml,RUN_NAME=grid_001_qwen3vl32b_v1 train.sh
-CONFIG_PATH="${CONFIG_PATH:-recipes/grid-003-qwen3.5-35b.yaml}"
-RUN_NAME="${RUN_NAME:-grid_003_qwen3.5_35b_v1}"
+CONFIG_PATH="${CONFIG_PATH:-recipes/grid-004-gemma-4-31b.yaml}"
+RUN_NAME="${RUN_NAME:-grid_004_gemma4_31b_v1}"
+TRAIN_EXTRA_ARGS="${TRAIN_EXTRA_ARGS:-}"
 
 echo "Config: $CONFIG_PATH"
 echo "Run name: $RUN_NAME"
+echo "Extra args: $TRAIN_EXTRA_ARGS"
 
 srun python src/train.py \
     --config "$CONFIG_PATH" \
-    --run_name "$RUN_NAME"
+    --run_name "$RUN_NAME" \
+    $TRAIN_EXTRA_ARGS

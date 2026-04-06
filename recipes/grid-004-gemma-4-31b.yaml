@@ -1,0 +1,58 @@
+# ============================================================
+# Grid-004 LoRA Fine-Tuning Recipe (Gemma 4 31B, HF 4-bit QLoRA)
+# ============================================================
+# Fine-tune Gemma on the grid-004 single-image isometric
+# cell-localization dataset (image -> coordinates).
+#
+# Notes:
+# - This repo's grid-004 supervision uses {"coordinates": [i, j]}.
+# - This recipe enables Gemma vision LoRA. The HF helper targets both the
+#   Gemma vision tower and the `embed_vision.embedding_projection` bridge.
+# - Replace model_name with the exact Hugging Face checkpoint you have access
+#   to if it differs from the string below.
+#
+# Usage:
+#   python src/train.py \
+#       --config recipes/grid-004-gemma-4-31b.yaml \
+#       --run_name grid_004_gemma4_31b_v1
+#
+# SLURM:
+#   sbatch --export=ALL,CONFIG_PATH=recipes/grid-004-gemma-4-31b.yaml,RUN_NAME=grid_004_gemma4_31b_v1 train.sh
+# ============================================================
+
+# --- Model ---
+model_name: google/gemma-4-31B
+backend: hf
+load_in_4bit: false
+
+# --- Dataset ---
+dataset_path: dataset/grid-004/train_dataset.jsonl
+dataset_dir: dataset/grid-004
+
+# --- Run ---
+run_name: grid_004_gemma4_31b
+
+# --- LoRA ---
+lora_r: 16
+lora_alpha: 16
+lora_dropout: 0.0
+finetune_vision_layers: true
+finetune_language_layers: true
+finetune_attention_modules: true
+finetune_mlp_modules: true
+
+# --- Training ---
+batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 5.0e-5
+num_epochs: 20
+warmup_steps: 5
+max_length: 512
+lr_scheduler_type: linear
+weight_decay: 0.01
+seed: 3407
+
+# --- Inference ---
+inference_max_tokens: 256
+inference_temperature: 0.1
+inference_min_p: 0.1

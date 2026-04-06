@@ -8,7 +8,7 @@ huggingface_hub==0.36.0
 instructor==1.14.4
 Jinja2==3.1.6
 matplotlib==3.10.8
-mistral_common==1.8.8
+mistral_common>=1.10.0
 numpy==2.4.1
 openai==2.15.0
 packaging==26.0

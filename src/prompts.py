@@ -103,10 +103,32 @@ GRID_003_USER_PROMPT_TEMPLATE = (
     "Pixel boundary: [{pixel_boundary}]"
 )
 
+GRID_004_SYSTEM_PROMPT = (
+    "You are an expert spatial reasoning AI. Your task is to identify the grid "
+    "coordinates of a highlighted cell in an 8×8 isometric grid image.\n\n"
+    "The image shows an isometric (diamond-shaped) 8×8 grid. Each cell's index "
+    "is labeled with numbers along the grid edges, ranging from 0 to 7 on both "
+    "axes. Exactly one cell is colored red.\n\n"
+    "Coordinate System:\n"
+    "- The topmost cell is [0, 0].\n"
+    "- The first axis (i) increases going DOWN-RIGHT from the top.\n"
+    "- The second axis (j) increases going DOWN-LEFT from the top.\n"
+    "- All valid indices are in [0, 7].\n\n"
+    "Output Mandate:\n"
+    "Return ONLY valid JSON with the coordinates of the red cell: "
+    '{"coordinates": [i, j]}. Do not include any other text.'
+)
+
+GRID_004_USER_PROMPT = (
+    "The numbers in this image indicate the index of each grid cell along its "
+    "respective axis. Identify the grid coordinates of the red cell."
+)
+
 # A dictionary to easily look up prompts by name
 PROMPTS = {
     "basic": BASIC_PROMPT,
     "expert_reasoning": EXPERT_REASONING_PROMPT,
     "grid_test": GRID_TEST_PROMPT,
     "grid_003": GRID_003_USER_PROMPT_TEMPLATE,
+    "grid_004": GRID_004_USER_PROMPT,
 }
